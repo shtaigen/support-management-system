@@ -1,12 +1,12 @@
-   # Store all text files with LF line endings in the repository
-   * text=auto eol=lf
+# Store all text files with LF line endings in the repository
+* text=auto eol=lf
 
-   # Windows scripts must keep CRLF
-   *.cmd text eol=crlf
-   *.bat text eol=crlf
+# Windows scripts must keep CRLF
+*.cmd text eol=crlf
+*.bat text eol=crlf
 
-   # Binary files: never modify
-   *.jar binary
-   *.png binary
-   *.jpg binary
-   *.ico binary
+# Binary files: never modify
+*.jar binary
+*.png binary
+*.jpg binary
+*.ico binary
