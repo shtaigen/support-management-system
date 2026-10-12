@@ -1,0 +1,19 @@
+   # IDE
+   .idea/
+   *.iml
+   .vscode/
+
+   # OS
+   .DS_Store
+   Thumbs.db
+
+   # Secrets and local environment
+   .env
+   .env.*
+   !.env.example
+
+   # Claude Code local (personal) settings; shared settings.json is committed
+   .claude/settings.local.json
+
+   # Logs
+   *.log
