@@ -1,2 +1,9 @@
-<mat-toolbar>Support System</mat-toolbar>
+<mat-toolbar>
+  <span>Support System</span>
+  <span class="spacer"></span>
+  @if (auth.role(); as role) {
+    <span class="role">{{ role }}</span>
+    <button mat-button (click)="logout()">Log out</button>
+  }
+</mat-toolbar>
 <router-outlet />
