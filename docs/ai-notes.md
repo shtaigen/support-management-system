@@ -40,3 +40,7 @@ While running the backend build locally, the agent did not read `.env` (denied i
 ## 2026-10-14: A green local build that proved less than it seemed
 Locally, Flyway reported "No migration necessary": the Docker volume already had V1 applied, so the run did not check V1 on an empty database. The agent pointed this out. CI starts every run with an empty Postgres service container, so the first green CI run was the first real check of V1 from scratch.
 Lesson: "works on my machine" can hide state; CI's clean environment is part of the test.
+
+## 2026-10-14: The spec described the old system, not ours
+While deriving docs/requirements.md from an earlier implementation of the same domain, the agent analysed the source accurately, but its first plan listed choices already fixed in V1 and the ADRs as open questions and was about to publish defects of the old code as findings. After I pointed it to docs/decisions.md and V1 as the source of truth, required a Source field for every requirement and asked for defects to be restated as positive requirements, the second plan specified our system with traceable IDs.
+Lesson: an agent reverse-engineering code reproduces what it reads; project decisions must be in its context explicitly.
