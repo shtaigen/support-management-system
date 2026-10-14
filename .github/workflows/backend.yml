@@ -1,0 +1,61 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend.yml'
+  pull_request:
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    # Throwaway CI credentials. They match the defaults in application.yaml and .env.example.
+    # The `env` context is not available in `services`, so the values are repeated there.
+    env:
+      POSTGRES_DB: support
+      POSTGRES_USER: support
+      POSTGRES_PASSWORD: change-me
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: support
+          POSTGRES_USER: support
+          POSTGRES_PASSWORD: change-me
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U support -d support"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Build and test
+        run: ./mvnw -B verify
