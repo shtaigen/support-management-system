@@ -33,3 +33,10 @@ The agent added repo-verified facts I had not listed: the backend does not load 
 ## 2026-10-13: Guidance vs enforcement
 `CLAUDE.md` shapes what the agent tries to do; `.claude/settings.json` decides what Claude Code allows. On Windows the agent runs commands through the PowerShell tool, so rules must be written as `PowerShell(...)`; `Bash(...)` rules alone would not match. Ask rules still prompt in auto mode.
 Limit: rules match command text and are not a security boundary (`git -C . push` is not matched by `git push *`); real isolation needs a sandbox.
+
+## 2026-10-14: The agent followed the project rules without reminders
+While running the backend build locally, the agent did not read `.env` (denied in `.claude/settings.json`) and planned to report a credentials mismatch instead of working around it. Starting the database used the allowed `docker compose up`; the build command asked for approval.
+
+## 2026-10-14: A green local build that proved less than it seemed
+Locally, Flyway reported "No migration necessary": the Docker volume already had V1 applied, so the run did not check V1 on an empty database. The agent pointed this out. CI starts every run with an empty Postgres service container, so the first green CI run was the first real check of V1 from scratch.
+Lesson: "works on my machine" can hide state; CI's clean environment is part of the test.
