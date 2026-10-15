@@ -56,3 +56,7 @@ Lesson: A test that passes on the developer's machine regardless of the fix prov
 ## 2026-10-15: Mockito agent and a Windows path with spaces
 Passing Mockito as a Java agent via surefire argLine crashed the forked JVM locally: the Maven repository lives under "C:\Users\O M E N\.m2", and the unquoted -javaagent path was split at the spaces. Quoting the path fixed it; CI on Linux would never have shown the problem.
 Lesson: Build configuration that embeds file paths must be tested on the developer machine, not only in CI; quote paths in argLine.
+
+## 2026-10-15: Stale classes after moving an entity
+After Message moved from the message package to ticket, Claude Code noticed that target/classes still contained the old message/Message.class. Incremental builds do not remove classes of deleted sources, so a local build could fail with a duplicate entity name or, worse, pass against a class that no longer exists. A clean build removed the risk; CI was never affected because it builds from a fresh checkout.
+Lesson: After moving or deleting classes, run a clean build before trusting a local green result.
