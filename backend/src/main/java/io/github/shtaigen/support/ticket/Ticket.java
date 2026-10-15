@@ -1,6 +1,7 @@
 package io.github.shtaigen.support.ticket;
 
 import io.github.shtaigen.support.user.User;
+import io.github.shtaigen.support.user.UserRole;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -24,9 +25,13 @@ import java.util.regex.Pattern;
 /**
  * A support ticket opened by a customer. Mapped to the V1 {@code tickets} table.
  *
- * <p>Timestamps are set in Java: {@code createdAt}, {@code updatedAt} and {@code lastMessageAt}
- * start at the creation instant, {@code updatedAt} is refreshed on every update (BR-13), and
- * {@code lastMessageAt} is changed only by domain methods.
+ * <p>Timestamps are set in Java: {@code createdAt} and {@code updatedAt} start at the creation
+ * instant, {@code updatedAt} is refreshed on every update (BR-13), and {@code lastMessageAt} is
+ * set only by {@link #postMessage}, to the {@code createdAt} of the latest message.
+ *
+ * <p>All state changes go through the domain methods {@link #open}, {@link #postMessage},
+ * {@link #changeStatus} and {@link #assignTo}. Who may call which operation is checked by the
+ * service layer.
  */
 @Entity
 @Table(name = "tickets")
@@ -82,13 +87,8 @@ public class Ticket {
         // for JPA
     }
 
-    /**
-     * Creates a new, unassigned ticket in status OPEN (TR-01, BR-03).
-     *
-     * @param referenceNumber optional; null or blank means none
-     */
-    public Ticket(User customer, String subject, TicketCategory category, String referenceNumber) {
-        this.customer = Objects.requireNonNull(customer, "customer must not be null");
+    private Ticket(User customer, String subject, TicketCategory category, String referenceNumber) {
+        this.customer = customer;
         this.subject = normalizeSubject(subject);
         this.category = Objects.requireNonNull(category, "category must not be null");
         this.referenceNumber = normalizeReferenceNumber(referenceNumber);
@@ -97,6 +97,107 @@ public class Ticket {
         this.createdAt = now;
         this.updatedAt = now;
         this.lastMessageAt = now;
+    }
+
+    /**
+     * Opens a new, unassigned ticket in status OPEN with its first message (TR-01, BR-03, BR-16).
+     * The first message goes through {@link #postMessage}, so {@code lastMessageAt} equals its
+     * {@code createdAt}.
+     *
+     * @param referenceNumber optional; null or blank means none
+     */
+    public static OpenedTicket open(User customer, String subject, TicketCategory category,
+                                    String referenceNumber, String firstMessageBody) {
+        Objects.requireNonNull(customer, "customer must not be null");
+        if (customer.getRole() != UserRole.CUSTOMER) {
+            throw new IllegalArgumentException("customer must have role " + UserRole.CUSTOMER);
+        }
+        Ticket ticket = new Ticket(customer, subject, category, referenceNumber);
+        Message firstMessage = ticket.postMessage(customer, firstMessageBody);
+        return new OpenedTicket(ticket, firstMessage);
+    }
+
+    /**
+     * Records a new message on this ticket. This is the only way to create a message (BR-17): it
+     * applies the status rules (TR-02..TR-06, BR-06), assigns the first replying agent (BR-09) and
+     * sets {@code lastMessageAt} to the message's {@code createdAt} (BR-13).
+     *
+     * @throws InvalidTicketTransitionException if an agent posts to a CLOSED ticket (BR-06)
+     * @throws IllegalArgumentException if a customer other than the ticket's customer is the author,
+     *                                  or the body is invalid (BR-11)
+     */
+    public Message postMessage(User author, String body) {
+        Objects.requireNonNull(author, "author must not be null");
+        TicketStatus next = statusAfterMessageBy(author);
+        Message message = new Message(this, author, body);
+        if (author.getRole() == UserRole.AGENT && assignee == null) {
+            assignee = author;
+        }
+        status = next;
+        lastMessageAt = message.getCreatedAt();
+        return message;
+    }
+
+    private TicketStatus statusAfterMessageBy(User author) {
+        return switch (author.getRole()) {
+            case AGENT -> {
+                if (status == TicketStatus.CLOSED) {
+                    throw new InvalidTicketTransitionException(status, TicketStatus.ANSWERED);
+                }
+                yield TicketStatus.ANSWERED;
+            }
+            case CUSTOMER -> {
+                if (!sameUser(author, customer)) {
+                    throw new IllegalArgumentException("author must be the ticket's customer");
+                }
+                yield status == TicketStatus.OPEN ? TicketStatus.OPEN : TicketStatus.CUSTOMER_REPLIED;
+            }
+        };
+    }
+
+    /**
+     * Changes the status manually: any non-closed status to CLOSED (TR-07), or CLOSED to OPEN
+     * (TR-08). The assignee is kept.
+     *
+     * @throws InvalidTicketTransitionException for every other target, including the current
+     *                                          status (BR-07)
+     */
+    public void changeStatus(TicketStatus target) {
+        Objects.requireNonNull(target, "target must not be null");
+        boolean allowed = (target == TicketStatus.CLOSED && status != TicketStatus.CLOSED)
+                || (target == TicketStatus.OPEN && status == TicketStatus.CLOSED);
+        if (!allowed) {
+            throw new InvalidTicketTransitionException(status, target);
+        }
+        status = target;
+    }
+
+    /**
+     * Assigns or reassigns the ticket to an agent (FR-12, BR-10). Assigning the current assignee
+     * again changes nothing. Unassigning is not supported.
+     *
+     * @throws IllegalArgumentException if {@code agent} does not have role AGENT
+     */
+    public void assignTo(User agent) {
+        Objects.requireNonNull(agent, "agent must not be null");
+        if (agent.getRole() != UserRole.AGENT) {
+            throw new IllegalArgumentException("assignee must have role " + UserRole.AGENT);
+        }
+        if (assignee != null && sameUser(assignee, agent)) {
+            return;
+        }
+        assignee = agent;
+    }
+
+    // User has no equals(). Ids are read through the getter, which does not initialize a
+    // Hibernate proxy; the identity check covers users that are not persisted yet.
+    private static boolean sameUser(User a, User b) {
+        if (a == b) {
+            return true;
+        }
+        Long aId = a.getId();
+        Long bId = b.getId();
+        return aId != null && bId != null && aId.equals(bId);
     }
 
     @PreUpdate

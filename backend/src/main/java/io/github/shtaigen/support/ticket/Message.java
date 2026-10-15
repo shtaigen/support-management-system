@@ -1,6 +1,5 @@
-package io.github.shtaigen.support.message;
+package io.github.shtaigen.support.ticket;
 
-import io.github.shtaigen.support.ticket.Ticket;
 import io.github.shtaigen.support.user.User;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -52,7 +51,7 @@ public class Message {
     /**
      * Creates a message. The body is stored as given (not stripped) to keep its formatting.
      */
-    public Message(Ticket ticket, User author, String body) {
+    Message(Ticket ticket, User author, String body) {
         this.ticket = Objects.requireNonNull(ticket, "ticket must not be null");
         this.author = Objects.requireNonNull(author, "author must not be null");
         this.body = requireBody(body);
