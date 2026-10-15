@@ -44,3 +44,12 @@ Lesson: "works on my machine" can hide state; CI's clean environment is part of 
 ## 2026-10-14: The spec described the old system, not ours
 While deriving docs/requirements.md from an earlier implementation of the same domain, the agent analysed the source accurately, but its first plan listed choices already fixed in V1 and the ADRs as open questions and was about to publish defects of the old code as findings. After I pointed it to docs/decisions.md and V1 as the source of truth, required a Source field for every requirement and asked for defects to be restated as positive requirements, the second plan specified our system with traceable IDs.
 Lesson: an agent reverse-engineering code reproduces what it reads; project decisions must be in its context explicitly.
+
+## 2026-10-15: JPA entities and DB default timestamps
+While planning entities for V1, Claude Code pointed out that Hibernate lists every mapped column in its INSERT, so a DB DEFAULT now() on created_at would never fire and the NOT NULL constraint would fail. We set timestamps in the entity constructors, refresh updated_at via @PreUpdate, and truncate to microseconds to match timestamptz. DB defaults stay only as a safety net for manual SQL and seeds.
+Lesson: With ddl-auto validate the schema is the contract, but DB defaults are not part of what Hibernate writes; decide explicitly which side owns each generated value.
+
+## 2026-10-15: Locale-safe normalization test
+Claude Code noticed that its own test for email normalization did not actually exercise a non-default locale, and rewrote it to run under a Turkish default locale, where "I".toLowerCase() yields a dotless i. The test now proves that Locale.ROOT is required, instead of passing trivially.
+Lesson: A test that passes on the developer's machine regardless of the fix proves nothing; make the test fail without the fix first.
+
