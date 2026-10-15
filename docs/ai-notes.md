@@ -53,3 +53,6 @@ Lesson: With ddl-auto validate the schema is the contract, but DB defaults are n
 Claude Code noticed that its own test for email normalization did not actually exercise a non-default locale, and rewrote it to run under a Turkish default locale, where "I".toLowerCase() yields a dotless i. The test now proves that Locale.ROOT is required, instead of passing trivially.
 Lesson: A test that passes on the developer's machine regardless of the fix proves nothing; make the test fail without the fix first.
 
+## 2026-10-15: Mockito agent and a Windows path with spaces
+Passing Mockito as a Java agent via surefire argLine crashed the forked JVM locally: the Maven repository lives under "C:\Users\O M E N\.m2", and the unquoted -javaagent path was split at the spaces. Quoting the path fixed it; CI on Linux would never have shown the problem.
+Lesson: Build configuration that embeds file paths must be tested on the developer machine, not only in CI; quote paths in argLine.
