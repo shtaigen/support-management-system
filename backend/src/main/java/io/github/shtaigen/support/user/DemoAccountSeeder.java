@@ -6,7 +6,6 @@ import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Profile;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 
@@ -34,11 +33,12 @@ class DemoAccountSeeder implements ApplicationRunner {
 
     private final UserRepository users;
     private final DemoSeedProperties properties;
-    private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
+    private final PasswordEncoder passwordEncoder;
 
-    DemoAccountSeeder(UserRepository users, DemoSeedProperties properties) {
+    DemoAccountSeeder(UserRepository users, DemoSeedProperties properties, PasswordEncoder passwordEncoder) {
         this.users = users;
         this.properties = properties;
+        this.passwordEncoder = passwordEncoder;
     }
 
     @Override

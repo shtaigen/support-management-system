@@ -1,0 +1,7 @@
+# Test-only settings. Boot loads classpath:/config/application.yaml in addition to the main
+# application.yaml (and overrides it), so the main file stays in effect. Do not move this file to
+# the test resources root: there it would replace the main application.yaml.
+app:
+  jwt:
+    # Test-only signing key, never used outside tests.
+    secret: jaHxoma90FhgKHyTel8wJrHWFfWW+QYQK58mbanlGd4=

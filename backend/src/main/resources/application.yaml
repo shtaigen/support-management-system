@@ -9,3 +9,10 @@ spring:
     open-in-view: false
     hibernate:
       ddl-auto: validate
+
+app:
+  jwt:
+    # The signing key has no default here: set APP_JWT_SECRET (Base64, at least 32 random bytes).
+    # Startup fails if it is missing or too short.
+    ttl: 60m
+    issuer: support-backend

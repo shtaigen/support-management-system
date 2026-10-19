@@ -34,6 +34,20 @@ Lombok and Testcontainers are not in the project on purpose.
 Do not add them (or alternatives) without asking first.
 
 ## Spring Security
-Only `spring-security-crypto` is present (BCrypt for demo seed passwords, ADR-013).
-The security starter, resource server and SecurityFilterChain are added in step 4c (ADR-009).
-Do not add other security dependencies without asking first.
+Present: `spring-security-crypto` (the shared `PasswordEncoder` bean, BCrypt) and
+`spring-security-oauth2-jose` (`NimbusJwtEncoder`, used only to issue tokens at
+`POST /api/auth/login`). Neither activates Spring Boot security auto-configuration: in Boot 4 it
+lives in the `spring-boot-security*` modules that only the starters bring in. `NoWebSecurityYetTest`
+checks this. The security starter, resource server, `SecurityFilterChain` and `JwtDecoder` bean are
+added in step 4c (ADR-009). Do not add other security dependencies without asking first.
+
+JWT signing key `app.jwt.secret`: Base64, at least 32 random bytes after decoding. There is no
+default in `application.yaml`, and startup fails if it is missing or too short.
+- Prod and other runs: set `APP_JWT_SECRET`.
+- Demo profile: `application-demo.yaml` has a dev-only key.
+- Tests and CI: `src/test/resources/config/application.yaml` has a test-only key. It sits under
+  `config/` on purpose: a test-root `application.yaml` would replace the main one.
+- Generate a key: `openssl rand -base64 32`.
+
+Never log passwords, hashes or tokens (NFR-02). Request/response records that hold them mask
+`toString()`.

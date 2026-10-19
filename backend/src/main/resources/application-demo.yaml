@@ -2,3 +2,7 @@ app:
   seed:
     # Shared password of all demo accounts. Override with APP_SEED_DEMOPASSWORD.
     demo-password: demo1234
+  jwt:
+    # Dev only, like the demo password: never use it outside the demo profile.
+    # Override with APP_JWT_SECRET.
+    secret: zpV5VsTrj6Gemz5Uvo7HvwRle3bRf8TlVnezYaqQpGY=
