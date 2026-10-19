@@ -60,3 +60,8 @@ Lesson: Build configuration that embeds file paths must be tested on the develop
 ## 2026-10-15: Stale classes after moving an entity
 After Message moved from the message package to ticket, Claude Code noticed that target/classes still contained the old message/Message.class. Incremental builds do not remove classes of deleted sources, so a local build could fail with a duplicate entity name or, worse, pass against a class that no longer exists. A clean build removed the risk; CI was never affected because it builds from a fresh checkout.
 Lesson: After moving or deleting classes, run a clean build before trusting a local green result.
+
+## 2026-10-19: Demo seed — agent asked instead of guessing
+The prompt told the agent to stop if the ADRs did not decide the seeding mechanism. It did, and offered three options with trade-offs (Java runner under a profile, Flyway V2, profile-only Flyway location). Choosing the runner kept Flyway schema-only and kept demo passwords out of prod. Plan review also caught a naming clash: a default repository method cannot delegate to a derived query with the same name.
+
+Lesson: an explicit "stop and ask if the ADRs don't decide" turns a hidden architectural choice into a reviewed decision.

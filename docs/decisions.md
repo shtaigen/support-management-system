@@ -93,3 +93,11 @@ Status: Accepted
 - Current Angular defaults kept: standalone components, signals, OnPush, zoneless change detection, Vitest (no browser needed in CI).
 - Angular Material (M3 theme, azure-blue) over PrimeNG: official, released in lockstep with Angular, stable API.
 - Known trade-off: fonts (Roboto, Material Symbols) load from the Google Fonts CDN. On a closed corporate network they would be self-hosted.
+
+## ADR-013: Demo account seeding
+Status: Accepted
+
+- Decision: demo accounts (2 agents, 2 customers on example.com) are created by `DemoAccountSeeder`, an `ApplicationRunner` under `@Profile("demo")`. It inserts an account only if its email is missing, so restarts are idempotent. All accounts share one password from `app.seed.demo-password` (`application-demo.yaml`, overridable via `APP_SEED_DEMOPASSWORD`); there is no default in code and startup fails if it is missing or blank. Hashing uses `spring-security-crypto` (BCrypt) only.
+- Why: Flyway stays schema-only (ADR-003), and environments without the demo profile (prod) never get demo accounts or known passwords.
+- Trade-off: existing rows are never updated, so changing the demo password requires recreating the local DB volume. Local runs and the seed test need the demo profile.
+- Alternatives: Flyway V2 with precomputed BCrypt hashes (demo passwords in every environment, prod included); a profile-only Flyway location with a repeatable migration (environment-specific entries in flyway_schema_history).

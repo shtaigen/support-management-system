@@ -4,6 +4,7 @@
 - Build + tests: `.\mvnw.cmd verify`
 - Tests only: `.\mvnw.cmd test`
 - Run app: `.\mvnw.cmd spring-boot:run`
+- Run app with demo accounts: `.\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=demo"`
 
 Tests and the app need the Postgres container running (`docker compose up -d` from the repo
 root). There is no Testcontainers or in-memory DB: `@SpringBootTest` connects to the real DB.
@@ -29,5 +30,10 @@ root). There is no Testcontainers or in-memory DB: `@SpringBootTest` connects to
 service/transaction (fetch joins, entity graphs or DTO projections), not in controllers.
 
 ## Deliberately absent
-Spring Security, Lombok and Testcontainers are not in the project on purpose.
+Lombok and Testcontainers are not in the project on purpose.
 Do not add them (or alternatives) without asking first.
+
+## Spring Security
+Only `spring-security-crypto` is present (BCrypt for demo seed passwords, ADR-013).
+The security starter, resource server and SecurityFilterChain are added in step 4c (ADR-009).
+Do not add other security dependencies without asking first.
