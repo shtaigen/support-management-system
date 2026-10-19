@@ -1,0 +1,4 @@
+app:
+  seed:
+    # Shared password of all demo accounts. Override with APP_SEED_DEMOPASSWORD.
+    demo-password: demo1234
