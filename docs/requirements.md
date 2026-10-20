@@ -125,7 +125,7 @@ Common error responses, used by all FRs (details in NFR-03):
 |---|---|
 | Actor | Customer |
 | Description | The customer sees a list of their own tickets. |
-| Inputs | Optional status filter: one or more of the four statuses. |
+| Inputs | Optional `status` filter: one or more of the four statuses, given as a repeatable query parameter (`?status=OPEN&status=CLOSED`). Without it, tickets in all statuses are returned. |
 | Outcome | Only the caller's tickets, sorted by NFR-05. Each item shows id, subject, category, reference number, status, `created_at` and `last_message_at`. It does not show the assignee. |
 | Errors | 400 when a status value is unknown. 403 when the caller is not a customer. |
 | Source | EI (own tickets, newest activity first, status tabs). PD (V1 index, agreed in review). |
@@ -146,8 +146,8 @@ Common error responses, used by all FRs (details in NFR-03):
 | Actor | Customer |
 | Description | The customer adds a message to one of their tickets. |
 | Inputs | Ticket id. `body` (BR-11). |
-| Outcome | A message authored by the caller. The status changes according to TR-03..TR-06; on a CLOSED ticket this reopens it to CUSTOMER_REPLIED. `last_message_at` and `updated_at` are set. |
-| Errors | 400 on an invalid body. 404 when the ticket is missing or not owned. 409 on a version conflict. |
+| Outcome | A message authored by the caller. The status changes according to TR-03..TR-06; on a CLOSED ticket this reopens it to CUSTOMER_REPLIED. `last_message_at` and `updated_at` are set. The response is the updated ticket view, as in FR-05, so the client sees the new status. |
+| Errors | 400 on an invalid body. 404 when the ticket is missing or not owned. 409 when another change to the ticket was committed at the same time (BR-15); the request carries no version. |
 | Source | EI (customer message reopens a closed ticket). PD (target statuses, agreed in review). |
 
 ### FR-07 List all tickets as an agent
