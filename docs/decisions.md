@@ -40,7 +40,7 @@ Status: Accepted
 - Alternatives: `citext` extension; unique index on `lower(email)`.
 
 ## ADR-006: Optimistic locking on tickets
-Status: Accepted (column), Planned (entity mapping)
+Status: Accepted
 
 - Context: two agents may change the status of the same ticket at the same time.
 - Decision: `tickets.version` column mapped with `@Version`; a conflicting update fails and the API returns 409.
