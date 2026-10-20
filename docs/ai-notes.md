@@ -63,5 +63,12 @@ Lesson: After moving or deleting classes, run a clean build before trusting a lo
 
 ## 2026-10-19: Demo seed — agent asked instead of guessing
 The prompt told the agent to stop if the ADRs did not decide the seeding mechanism. It did, and offered three options with trade-offs (Java runner under a profile, Flyway V2, profile-only Flyway location). Choosing the runner kept Flyway schema-only and kept demo passwords out of prod. Plan review also caught a naming clash: a default repository method cannot delegate to a derived query with the same name.
-
 Lesson: an explicit "stop and ask if the ADRs don't decide" turns a hidden architectural choice into a reviewed decision.
+
+## 2026-10-19: Login endpoint — limits that look like details
+Plan review for the login endpoint surfaced three non-obvious constraints. BCrypt accepts at most 72 bytes, not characters, so @Size alone lets a 25-character password of multi-byte symbols through and the encoder then throws a 500; a small UTF-8 byte validator turns it into a 400. A read-only transaction around login would hold a pooled connection during the ~100 ms BCrypt check, so the transaction was removed. JWT timestamps are whole seconds, so the issue instant is truncated once and reused for iat, exp and expiresAt.
+Lesson: review a plan for resource and unit boundaries (bytes vs chars, seconds vs nanos, connection lifetime), not only for business logic.
+
+## 2026-10-19: Resource server — 401 vs 403 and a framework surprise
+The plan treated a valid token without a known role as 403, not 401: the caller is authenticated, and logging in again would not help. The default bearer entry point puts the rejection reason into WWW-Authenticate, so it was replaced to keep every rejected token indistinguishable. Security rules were tested without probe controllers: a wrong zone gives 403, a missing path in the own zone gives 404, which proves the request passed security. During implementation Spring Security 7 turned out to add a FACTOR_BEARER authority next to the roles (multi-factor support); role checks were unaffected, but a strict authorities assertion would have failed.
+Lesson: assert only what the code under test controls; framework upgrades add things around it.

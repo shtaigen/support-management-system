@@ -63,12 +63,18 @@ Status: Planned
 - Alternatives: package by layer (global `controllers/`, `services/`); MapStruct. Both work, but add indirection that is harder to explain and navigate.
 
 ## ADR-009: Authentication and authorization
-Status: Planned
+Status: Accepted
 
-- Decision: Spring Security as an OAuth2 resource server with JWTs signed by the application's own key (`NimbusJwtEncoder`). No custom security filters.
-- Production note: tokens would come from a corporate identity provider (Keycloak, Azure AD); the backend is already a resource server.
-- Authorization rule: a customer sees only their own tickets, enforced in the query (`findByIdAndCustomerId`), not by filtering after loading. This prevents IDOR.
-- Alternatives: server sessions with cookies; a hand-written JWT filter.
+- Decision: Spring Security as an OAuth2 resource server with JWTs signed by the application's own key. No custom security filters.
+- Tokens: issued at `POST /api/auth/login` (FR-01) by `NimbusJwtEncoder`, HS256 with a symmetric key from `app.jwt.secret` (Base64, at least 256 bits, no default; `APP_JWT_SECRET` outside demo and tests). Claims: `iss`, `sub` (user id), `role`, `iat`, `exp`; no email or other personal data. Lifetime 60 minutes, no refresh token (NFR-01).
+- Verification: `NimbusJwtDecoder` accepts HS256 only and validates the issuer, `exp` (required) and `nbf` against the application clock with the default 60 s skew.
+- URL zones: `/api/customer/**` requires CUSTOMER, `/api/agent/**` requires AGENT, `POST /api/auth/login`, `GET /actuator/health` and `/error` are public, everything else is denied. Each role has its own endpoints and DTOs, so fields such as the assignee cannot leak to customers, and BR-02 is enforced in one place.
+- Authorities: the `role` claim maps to `ROLE_<role>`. A valid token with a missing or unknown role gets no role authority and receives 403, not 401 (the caller is authenticated but not permitted, RFC 6750).
+- Errors: 401 and 403 are Problem Details built by the common exception handler (NFR-03). Every rejected token gets the same body and `WWW-Authenticate: Bearer error="invalid_token"` without a description; the reason (expired, forged, malformed) is never disclosed.
+- Stateless sessions; CSRF, form login, HTTP basic and logout are disabled because the token travels in the Authorization header, not in a cookie. No CORS: the frontend reaches the API same-origin through a dev proxy, and through a reverse proxy in production.
+- Authorization rule: a customer sees only their own tickets, enforced in the query (`findByIdAndCustomerId`), not by filtering after loading. Another customer's ticket returns 404, the same as a missing one (BR-01). This prevents IDOR.
+- Production note: tokens would come from a corporate identity provider (Keycloak, Azure AD) signed with RS256 and published via JWKS; the backend is already a resource server, so only the decoder configuration changes.
+- Alternatives: server sessions with cookies; a hand-written JWT filter; shared API paths with method security (`@PreAuthorize`) and per-role serialization.
 
 ## ADR-010: Chat delivery
 Status: Planned
@@ -97,7 +103,7 @@ Status: Accepted
 ## ADR-013: Demo account seeding
 Status: Accepted
 
-- Decision: demo accounts (2 agents, 2 customers on example.com) are created by `DemoAccountSeeder`, an `ApplicationRunner` under `@Profile("demo")`. It inserts an account only if its email is missing, so restarts are idempotent. All accounts share one password from `app.seed.demo-password` (`application-demo.yaml`, overridable via `APP_SEED_DEMOPASSWORD`); there is no default in code and startup fails if it is missing or blank. Hashing uses `spring-security-crypto` (BCrypt) only.
-- Why: Flyway stays schema-only (ADR-003), and environments without the demo profile (prod) never get demo accounts or known passwords.
-- Trade-off: existing rows are never updated, so changing the demo password requires recreating the local DB volume. Local runs and the seed test need the demo profile.
-- Alternatives: Flyway V2 with precomputed BCrypt hashes (demo passwords in every environment, prod included); a profile-only Flyway location with a repeatable migration (environment-specific entries in flyway_schema_history).
+- Decision: demo accounts (2 agents, 2 customers on example.com) are created by `DemoAccountSeeder`, 
+an `ApplicationRunner` under `@Profile("demo")`. It inserts an account only if its email is missing, so restarts are idempotent. 
+All accounts share one password from `app.seed.demo-password` (`application-demo.yaml`, overridable via `APP_SEED_DEMOPASSWORD`); 
+there is no default in code and startup fails if it is missing or blank. Passwords are hashed with the shared BCrypt `PasswordEncoder` bean, the same one login uses.
