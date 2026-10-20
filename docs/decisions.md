@@ -54,13 +54,14 @@ Status: Accepted
 - Why: no lazy loading during JSON serialization and no hidden queries outside transactions; services must fetch what the response needs (fetch joins, entity graphs, projections).
 
 ## ADR-008: Backend structure
-Status: Planned
+Status: Accepted (structure, DTOs, errors), Planned (API docs)
 
-- Package by feature: `ticket/`, `message/`, `user/`, `auth/`, each with its own controller, service and repository.
+- Package by feature: `user/`, `ticket/`, `auth/`, plus `common/` for cross-cutting code (exception handling, clock). There is no `message/` package: `Message` belongs to the `Ticket` aggregate and is never changed on its own.
+- `Ticket` is the aggregate root. Every message, from either role, is added through `Ticket.postMessage(...)`, which applies the status rules, auto-assignment, body validation and authorship in one place (BR-17, NFR-08). Manual status changes and assignment are also `Ticket` methods. The domain rules are plain unit tests.
+- Controllers are split by role, not by entity: each role has its own controller and DTOs under its URL zone (ADR-009), so customer DTOs never contain the assignee.
 - DTOs are Java records; entities never leave the service layer; mapping is written by hand (no MapStruct).
-- Status transitions live in the `Ticket` entity (`onCustomerMessage()`, `changeStatus(...)`), so the domain rules are plain unit tests.
-- Errors: `@RestControllerAdvice` returning `ProblemDetail`. API docs: springdoc-openapi.
-- Alternatives: package by layer (global `controllers/`, `services/`); MapStruct. Both work, but add indirection that is harder to explain and navigate.
+- Errors: one `@RestControllerAdvice` returning `ProblemDetail` (NFR-03). API docs: springdoc-openapi (NFR-07, not yet added).
+- Alternatives: package by layer (global `controllers/`, `services/`); a separate `message/` feature with its own service, which would create a second write path for messages; MapStruct. These add indirection or weaken the single write path.
 
 ## ADR-009: Authentication and authorization
 Status: Accepted
