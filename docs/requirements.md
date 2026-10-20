@@ -155,20 +155,20 @@ Common error responses, used by all FRs (details in NFR-03):
 |---|---|
 | Actor | Agent |
 | Description | The agent sees the queue of all tickets. |
-| Inputs | Optional status filter: one or more statuses. Optional assignee filter: a specific agent, or "unassigned". |
-| Outcome | Matching tickets, sorted by NFR-05. Each item shows id, subject, category, reference number, status, customer name and email, assignee, and `last_message_at`. |
-| Errors | 400 when a filter value is invalid. 403 when the caller is not an agent. |
-| Source | EI (all tickets, status filter). PD (V1 indexes; "unassigned" agreed in review). |
+| Inputs | Optional status filter: one or more statuses. Optional assignee filter: a specific agent, or "unassigned". Optional customer filter: a customer id (used by FR-08). All filters can be combined. |
+| Outcome | Matching tickets, sorted by NFR-05. Each item shows id, subject, category, reference number, status, customer name and email, assignee, and `last_message_at`. A customer filter with an id that is not a customer returns an empty list. |
+| Errors | 400 when a filter value is invalid (an unknown status, or a malformed id). 403 when the caller is not an agent. |
+| Source | EI (all tickets, status filter). PD (V1 indexes; "unassigned" agreed in review; customer filter from the OQ-01 resolution). |
 
 ### FR-08 View tickets grouped by customer
 | Field | Value |
 |---|---|
 | Actor | Agent |
-| Description | The agent sees tickets organised by the customer who opened them. |
-| Inputs | To be defined, see OQ-01. |
-| Outcome | Each customer's tickets are presented together, using the same per-ticket fields as FR-07. The exact shape is open (OQ-01). |
+| Description | The agent sees a summary of customers who have tickets and drills down to one customer's tickets. |
+| Inputs | None for the summary. The drill-down is FR-07 with the customer filter, so the FR-07 status and assignee filters are available there. |
+| Outcome | The summary lists every customer with at least one ticket. Each item shows the customer id, name and email, `ticketCount` (all tickets), `activeTicketCount` (tickets not in CLOSED) and `lastMessageAt` (the latest `last_message_at` of the customer's tickets). It is sorted by NFR-05. Selecting a customer shows that customer's tickets with the same per-ticket fields as FR-07. |
 | Errors | 403 when the caller is not an agent. |
-| Source | PD (agreed in review, MVP). Not present in EI. |
+| Source | PD (agreed in review, MVP; shape resolved in OQ-01). Not present in EI. |
 
 ### FR-09 View any ticket as an agent
 | Field | Value |
@@ -330,7 +330,8 @@ These are listed only. V1 is not changed, and none of these is required by the M
 - Database-level CHECKs mirroring application rules: body length (BR-11), reference-number
   format (BR-18), and assignee role (BR-10, which would need a trigger or a schema change).
 
-FR-08, FR-11 and FR-12 need no schema change.
+FR-08, FR-11 and FR-12 need no schema change. The FR-08 summary is an aggregate over
+`tickets` grouped by `customer_id`, supported by the existing `(customer_id, last_message_at DESC)` index.
 
 ---
 
@@ -353,7 +354,9 @@ PD for the fields and actions.
 ### Agent zone
 1. **Login**: email and password (FR-01).
 2. **Ticket queue**: a table with status and assignee filters, including "unassigned" (FR-07).
-3. **By customer**: tickets grouped by customer (FR-08, OQ-01).
+3. **By customer**: a list of customers with ticket counts and latest activity (FR-08).
+   Selecting a customer opens that customer's tickets with the queue's status and assignee
+   filters (FR-07 with the customer filter).
 4. **Ticket detail**: customer info, the thread, and a reply box that is disabled while the
    ticket is CLOSED (FR-09, FR-10). It has Close and Reopen actions (FR-11) and an assignee
    selector (FR-12).
@@ -371,7 +374,7 @@ While a thread is open, it refreshes by polling (NFR-06).
 | NFR-02 | Passwords are stored only as hashes. Passwords and tokens are never written to logs. | PD (agreed in review) |
 | NFR-03 | Every error response uses one format: RFC 9457 Problem Details, with the status mapping in section 3 (400/401/403/404/409). | PD (ADR-008) |
 | NFR-04 | All input validation is done on the server. Client-side checks only improve usability and are never relied on. | PD (agreed in review) |
-| NFR-05 | Ticket lists are sorted by `last_message_at` descending, then `id` descending. Threads are sorted by `created_at` ascending, then `id` ascending. | PD (V1 indexes, agreed in review) |
+| NFR-05 | Ticket lists are sorted by `last_message_at` descending, then `id` descending. Threads are sorted by `created_at` ascending, then `id` ascending. The customer summary (FR-08) is sorted by `lastMessageAt` descending, then customer `id` descending. | PD (V1 indexes, agreed in review) |
 | NFR-06 | Chat updates use REST polling every 3–5 seconds, only while a thread is open. | PD (ADR-010) |
 | NFR-07 | The API is documented with OpenAPI. | PD (ADR-008) |
 | NFR-08 | Messages are written through a single write path (BR-17). No second channel bypasses validation or the status rules. | PD (agreed in review) |
@@ -397,6 +400,6 @@ While a thread is open, it refreshes by polling (NFR-06).
 
 ### Open questions
 
-| ID | Question |
-|---|---|
-| OQ-01 | What exact shape should the "grouped by customer" agent view (FR-08) have? For example, a customer list with ticket counts that drills down to that customer's tickets, or a single list split into sections by customer? Are the FR-07 filters available in this view? |
+| ID | Question | Status |
+|---|---|---|
+| OQ-01 | What exact shape should the "grouped by customer" agent view (FR-08) have? For example, a customer list with ticket counts that drills down to that customer's tickets, or a single list split into sections by customer? Are the FR-07 filters available in this view? | Resolved: a customer summary with ticket counts and latest activity, which drills down to FR-07 with a customer filter, so the FR-07 filters are available there. A single sectioned list was rejected: without pagination (out of scope) it returns every ticket of every customer in one response, while the summary grows only with the number of customers. See FR-08. |
