@@ -115,7 +115,7 @@ Common error responses, used by all FRs (details in NFR-03):
 |---|---|
 | Actor | Customer |
 | Description | The customer opens a new ticket with a first message. |
-| Inputs | `subject`: required, not blank, at most 200 characters. `category`: required, one of `GENERAL`, `POLICY`, `CLAIM`. `referenceNumber`: optional; if present, 1–50 characters of letters, digits and hyphens, stored uppercase. `message`: the first message body (BR-11). |
+| Inputs | `subject`: required, not blank, at most 200 characters after trimming, no NUL (U+0000) characters. `category`: required, one of `GENERAL`, `POLICY`, `CLAIM`. `referenceNumber`: optional; a blank value counts as absent; if present, see BR-18. `message`: the first message body (BR-11). |
 | Outcome | A ticket in status OPEN (TR-01), owned by the caller, unassigned, with the first message authored by the caller. Ticket and message are created in one transaction (BR-16). |
 | Errors | 400 on validation failure. 403 when the caller is not a customer. |
 | Source | EI (a ticket always starts with a message). PD (V1 columns and CHECKs; reference number format agreed in review). |
@@ -226,14 +226,14 @@ Common error responses, used by all FRs (details in NFR-03):
 | BR-08 | Customers cannot change a ticket's status, including closing it. | EI, PD |
 | BR-09 | The first agent reply on an unassigned ticket assigns the replying agent. A reply never overwrites an existing assignee. | EI, PD |
 | BR-10 | Agents can assign and reassign a ticket to any user with role AGENT. Unassigning is not supported in the MVP. The assignee is kept when a ticket is closed or reopened. | PD (agreed in review) |
-| BR-11 | A message body is required, not blank after trimming, and at most 4000 characters. It is validated on the server. | PD (V1 `messages_body_not_blank_ck`, agreed in review) |
+| BR-11 | A message body is required, not blank, and at most 4000 characters counted as sent (surrounding whitespace included; the body is stored unchanged). It must not contain NUL (U+0000) characters, which PostgreSQL text columns cannot store. It is validated on the server. | PD (V1 `messages_body_not_blank_ck`, agreed in review) |
 | BR-12 | Every message records its author (`author_id`). Whether the author is a customer or an agent follows from the author's role. | PD (V1) |
 | BR-13 | Timestamps are stored as `timestamptz`. `created_at` is set on insert. `last_message_at` is set when the ticket is created and on every message. `updated_at` is set on every change to the ticket (status, assignee, new message). | PD (V1) |
 | BR-14 | Emails are lowercased with a locale-independent mapping (`Locale.ROOT`) before every save and every lookup. They are unique, not blank, and at most 320 characters. | PD (ADR-005, V1) |
 | BR-15 | Concurrent ticket updates use optimistic locking on `tickets.version`. A conflicting update fails with 409 and changes nothing. | PD (ADR-006) |
 | BR-16 | Creating a ticket and its first message is one transaction. Either both exist or neither does. | EI, PD |
 | BR-17 | All messages, from either role and through any entry point, are written by one operation that applies BR-04..BR-06, BR-09, BR-11 and BR-12. | PD (agreed in review) |
-| BR-18 | `referenceNumber`, when present, matches 1–50 letters, digits or hyphens and is stored uppercase. | PD (agreed in review) |
+| BR-18 | `referenceNumber`, when present, is stripped of surrounding whitespace, matches 1–50 ASCII letters, digits or hyphens, and is stored uppercase. | PD (agreed in review) |
 
 ---
 

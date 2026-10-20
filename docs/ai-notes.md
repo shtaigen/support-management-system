@@ -76,3 +76,15 @@ Lesson: assert only what the code under test controls; framework upgrades add th
 ## 2026-10-20: Stale ADRs mislead the agent
 Before starting the ticket endpoints, ADR-008 still described a `message/` package and an `onCustomerMessage()` method that no longer exist; messages had moved into the `Ticket` aggregate behind `postMessage()`. Every Claude Code prompt names docs/decisions.md as the source of truth, so the agent would have followed the outdated ADR and could have added a second message write path, breaking BR-17. ADR-008 was updated before the next task, and OQ-01 was resolved in requirements.md so FR-08 has a defined shape before implementation.
 Lesson: documents that the agent treats as the source of truth must be brought up to date before the task, not after it; an outdated ADR is worse than a missing one.
+
+## 2026-10-20: Agent asked instead of choosing
+Before planning 5a, Claude Code stopped on two gaps the ADRs did not cover: how an unknown enum value should fail, and what to do when the JWT subject has no matching user. Both answers were refined (explicit role check instead of relying on the domain IllegalArgumentException).
+Lesson: the "stop and ask if the docs do not decide" rule works; review the offered options against the checklist, not just pick the recommended one.
+
+## 2026-10-20: Unhandled exceptions bypass Problem Details
+The 5a plan showed that an exception not covered by ApiExceptionHandler would go to /error and Boot's BasicErrorController, giving a non-ProblemDetail body, and the ERROR dispatch also passes the security chain. A catch-all handler with a fixed message closes both, as long as security exceptions are rethrown.
+Lesson: "no new handlers" in a prompt is a default, not a law; ask the agent to show the actual response path for 500 and for path-variable type errors before accepting it.
+
+## 2026-10-20: Test transactions hide missing service transactions
+Reviewing CustomerTicketService showed that every integration test runs inside its own @Transactional, so the tests would still pass if the service's @Transactional were ignored (for example on a method the proxy cannot intercept). Spring 6 does apply @Transactional to package-private methods of class-based proxies, so 5a is correct, but the tests do not prove it.
+Lesson: rollback-per-test proves behaviour, not transaction boundaries; when a boundary matters (BR-16), cover it with one test that runs without a test transaction.
