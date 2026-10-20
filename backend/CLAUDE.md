@@ -77,3 +77,6 @@ default in `application.yaml`, and startup fails if it is missing or too short.
 
 Never log passwords, hashes or tokens (NFR-02). Request/response records that hold them mask
 `toString()`.
+
+- Never annotate exceptions with @ResponseStatus: the catch-all @ExceptionHandler(Exception.class) in ApiExceptionHandler runs first and would turn them into 500. 
+An API error with a fixed status extends ErrorResponseException (see auth/InvalidCredentialsException, ticket/TicketNotFoundException).
