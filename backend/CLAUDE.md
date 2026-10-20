@@ -34,12 +34,38 @@ Lombok and Testcontainers are not in the project on purpose.
 Do not add them (or alternatives) without asking first.
 
 ## Spring Security
-Present: `spring-security-crypto` (the shared `PasswordEncoder` bean, BCrypt) and
-`spring-security-oauth2-jose` (`NimbusJwtEncoder`, used only to issue tokens at
-`POST /api/auth/login`). Neither activates Spring Boot security auto-configuration: in Boot 4 it
-lives in the `spring-boot-security*` modules that only the starters bring in. `NoWebSecurityYetTest`
-checks this. The security starter, resource server, `SecurityFilterChain` and `JwtDecoder` bean are
-added in step 4c (ADR-009). Do not add other security dependencies without asking first.
+`spring-boot-starter-security-oauth2-resource-server` (ADR-009) brings in Spring Security web,
+the resource server, jose (`NimbusJwtEncoder`/`NimbusJwtDecoder`) and crypto (the shared BCrypt
+`PasswordEncoder`). Tests get `spring-security-test` through the matching `-test` starter. Do not
+add other security dependencies without asking first.
+
+- `auth/JwtConfig` signs tokens and `auth/SecurityConfig` verifies them, both with
+  `JwtProperties.signingKey()`. The decoder accepts HS256 only and checks issuer, `exp` (required)
+  and `nbf` against the `Clock` bean, with the default 60 s skew.
+- The `role` claim maps to `ROLE_CUSTOMER` or `ROLE_AGENT` (`RoleClaimAuthoritiesConverter`). A
+  missing or unknown role gives no role authority, so the request gets 403. The principal name is
+  `sub` (the user id). Spring Security 7 also adds a `FACTOR_BEARER` authority; ignore it.
+- URL rules in `SecurityConfig`, with deny by default:
+
+  | Path | Access |
+  |---|---|
+  | `POST /api/auth/login`, `GET /actuator/health`, `/error` | public |
+  | `/api/customer/**` | CUSTOMER |
+  | `/api/agent/**` | AGENT |
+  | anything else | denied (401 without a token, 403 with one) |
+
+  A new endpoint must live under its role's prefix, or it is unreachable. Each role gets its own
+  endpoints and DTOs, so fields such as the assignee cannot leak to customers. There is no method
+  security (`@PreAuthorize`) yet.
+- NFR-07 (OpenAPI): the API docs and Swagger UI paths are denied by default too. They will need
+  explicit `permitAll` rules when springdoc is added.
+- 401 and 403 are Problem Details built by `ApiExceptionHandler`: `SecurityProblemHandler` passes an
+  `ErrorResponseException` to the MVC exception resolver. Every rejected token gets the same body
+  and `WWW-Authenticate: Bearer error="invalid_token"` (plain `Bearer` when no token was sent). Never
+  add the rejection reason to the body or the header.
+- Sessions are stateless. CSRF, form login, HTTP basic and logout are disabled (bearer header, no
+  cookies). There is no CORS on purpose: the Angular dev server is to proxy `/api` (not set up yet),
+  so calls stay same-origin.
 
 JWT signing key `app.jwt.secret`: Base64, at least 32 random bytes after decoding. There is no
 default in `application.yaml`, and startup fails if it is missing or too short.
