@@ -68,6 +68,7 @@ Status: Accepted (structure, DTOs, errors), Planned (API docs)
   - A valid token whose user is missing or has another role is an `IllegalStateException` and a 500, not a 4xx: the MVP never deletes users or changes roles, so it signals a bug, not a client error.
 - API docs: springdoc-openapi (NFR-07, not yet added).
 - Alternatives: package by layer (global `controllers/`, `services/`); a separate `message/` feature with its own service, which would create a second write path for messages; MapStruct. These add indirection or weaken the single write path.
+- Optimistic-locking conflicts (BR-15): `ObjectOptimisticLockingFailureException` reaches the advice (from the transaction manager at commit, or from a repository call at an auto-flush) and is handled in `ApiExceptionHandler` as 409 with the fixed detail "The data was changed by another request. Reload it and try again.". The response carries no entity name, id or version. It is a framework exception, so it has its own handler; our own exceptions still extend ErrorResponseException.
 
 ## ADR-009: Authentication and authorization
 Status: Accepted

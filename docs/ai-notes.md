@@ -88,3 +88,15 @@ Lesson: "no new handlers" in a prompt is a default, not a law; ask the agent to 
 ## 2026-10-20: Test transactions hide missing service transactions
 Reviewing CustomerTicketService showed that every integration test runs inside its own @Transactional, so the tests would still pass if the service's @Transactional were ignored (for example on a method the proxy cannot intercept). Spring 6 does apply @Transactional to package-private methods of class-based proxies, so 5a is correct, but the tests do not prove it.
 Lesson: rollback-per-test proves behaviour, not transaction boundaries; when a boundary matters (BR-16), cover it with one test that runs without a test transaction.
+
+## 2026-10-20: Pin timestamp round-trips outside the persistence context
+A test-level transaction lets a POST response and a following GET read the same in-memory entity, so a mismatch between Java and column precision would stay hidden. The entities already truncate to microseconds; flushing and clearing between the requests turns that into a tested guarantee.
+Lesson: When comparing a write response with a later read, clear the persistence context first.
+
+## 2026-10-20: Auto-flush follows query spaces
+In the conflict test the thread query touched only messages and users, so Hibernate did not flush the dirty ticket before it; the versioned UPDATE ran at commit and the optimistic-locking failure came from the transaction manager, not from a repository call. A handler or test that assumes the failure happens at a specific repository call can be wrong.
+Lesson: Know where the flush happens before deciding where an optimistic-locking failure surfaces.
+
+## 2026-10-20: Reconcile agent reports with hard numbers
+The agent reported 23 new controller test runs, but the build total grew by only 20. Asked to reconcile, it counted with git diff and found 18; no test had been lost. A mutation check (removing @Transactional from the service) then confirmed that the conflict test fails with 500 instead of 409.
+Lesson: Check an agent's summary against build totals and diffs, and prove a test's purpose by breaking the code it guards.

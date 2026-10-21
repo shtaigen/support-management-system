@@ -125,7 +125,7 @@ Common error responses, used by all FRs (details in NFR-03):
 |---|---|
 | Actor | Customer |
 | Description | The customer sees a list of their own tickets. |
-| Inputs | Optional `status` filter: one or more of the four statuses, given as a repeatable query parameter (`?status=OPEN&status=CLOSED`). Without it, tickets in all statuses are returned. |
+| Inputs | `status` (optional, repeatable): `?status=OPEN&status=CLOSED`. The comma form `?status=OPEN,CLOSED` is also accepted. Empty values are ignored (`?status=`, `?status=OPEN,`); if no value remains, all statuses are returned. Values are case-sensitive. An unknown or lowercase value gives 400 with `errors[{field: "status"}]`, without the rejected value. |
 | Outcome | Only the caller's tickets, sorted by NFR-05. Each item shows id, subject, category, reference number, status, `created_at` and `last_message_at`. It does not show the assignee. |
 | Errors | 400 when a status value is unknown. 403 when the caller is not a customer. |
 | Source | EI (own tickets, newest activity first, status tabs). PD (V1 index, agreed in review). |
