@@ -9,6 +9,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -57,6 +58,18 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
         String field = Objects.requireNonNullElse(ex.getPropertyName(), "request");
         List<FieldViolation> errors = List.of(new FieldViolation(field, "has an invalid format"));
         return handleExceptionInternal(ex, validationProblem(errors), headers, HttpStatus.BAD_REQUEST, request);
+    }
+
+    /**
+     * 409 when another transaction changed the same entity first (BR-15, ADR-006). The detail is
+     * fixed: the exception message names the entity and its id.
+     */
+    @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
+    @Nullable ResponseEntity<Object> handleOptimisticLockingFailure(
+            ObjectOptimisticLockingFailureException ex, WebRequest request) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.CONFLICT, "The data was changed by another request. Reload it and try again.");
+        return handleExceptionInternal(ex, problem, new HttpHeaders(), HttpStatus.CONFLICT, request);
     }
 
     /**

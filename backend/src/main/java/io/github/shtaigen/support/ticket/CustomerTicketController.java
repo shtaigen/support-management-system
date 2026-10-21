@@ -8,9 +8,11 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.net.URI;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/customer/tickets")
@@ -29,8 +31,20 @@ class CustomerTicketController {
         return ResponseEntity.created(URI.create("/api/customer/tickets/" + ticket.id())).body(ticket);
     }
 
+    @GetMapping
+    List<CustomerTicketSummary> list(@CurrentUserId long customerId,
+                                     @RequestParam(name = "status", required = false) List<TicketStatus> status) {
+        return service.list(customerId, status);
+    }
+
     @GetMapping("/{id}")
     CustomerTicketResponse get(@CurrentUserId long customerId, @PathVariable long id) {
         return service.get(customerId, id);
+    }
+
+    @PostMapping("/{id}/messages")
+    CustomerTicketResponse postMessage(@CurrentUserId long customerId, @PathVariable long id,
+                                       @Valid @RequestBody PostMessageRequest request) {
+        return service.postMessage(customerId, id, request);
     }
 }

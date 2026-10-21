@@ -8,6 +8,8 @@ import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.system.CapturedOutput;
@@ -22,7 +24,9 @@ import org.springframework.test.web.servlet.assertj.MvcTestResult;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.UnsupportedEncodingException;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -299,12 +303,223 @@ class CustomerTicketControllerTest {
         }
     }
 
+    // --- FR-04 list ---
+
+    @Test
+    void listShowsOnlyOwnTickets() {
+        Ticket open = ticketIn(TicketStatus.OPEN, customer);
+        Ticket closed = ticketIn(TicketStatus.CLOSED, customer);
+        ticketIn(TicketStatus.OPEN, otherCustomer);
+
+        MvcTestResult result = list(as(customer), "");
+
+        assertThat(result).hasStatusOk().hasContentType(MediaType.APPLICATION_JSON);
+        assertThat(ids(result)).containsExactlyInAnyOrder(open.getId(), closed.getId());
+    }
+
+    @Test
+    void listIsOrderedByLastMessageAtThenId() {
+        // newest is created first (lowest id); older and olderTie share a timestamp, so id decides.
+        Ticket newest = ticketIn(TicketStatus.OPEN, customer);
+        Ticket older = ticketIn(TicketStatus.OPEN, customer);
+        Ticket olderTie = ticketIn(TicketStatus.OPEN, customer);
+        Instant tie = Instant.parse("2026-01-01T10:00:00Z");
+        setLastMessageAt(newest, tie.plusSeconds(3600));
+        setLastMessageAt(older, tie);
+        setLastMessageAt(olderTie, tie);
+        em.clear();
+
+        assertThat(ids(list(as(customer), ""))).containsExactly(newest.getId(), olderTie.getId(), older.getId());
+    }
+
+    @Test
+    void listFiltersByStatus() {
+        Ticket open = ticketIn(TicketStatus.OPEN, customer);
+        Ticket answered = ticketIn(TicketStatus.ANSWERED, customer);
+        Ticket replied = ticketIn(TicketStatus.CUSTOMER_REPLIED, customer);
+        Ticket closed = ticketIn(TicketStatus.CLOSED, customer);
+        em.clear();
+
+        assertThat(ids(list(as(customer), "?status=ANSWERED"))).containsExactly(answered.getId());
+        assertThat(ids(list(as(customer), "?status=OPEN&status=CLOSED")))
+                .containsExactlyInAnyOrder(open.getId(), closed.getId());
+        assertThat(ids(list(as(customer), "")))
+                .containsExactlyInAnyOrder(open.getId(), answered.getId(), replied.getId(), closed.getId());
+    }
+
+    @Test
+    void emptyStatusValuesAreIgnored() {
+        Ticket open = ticketIn(TicketStatus.OPEN, customer);
+        Ticket closed = ticketIn(TicketStatus.CLOSED, customer);
+        em.clear();
+
+        assertThat(ids(list(as(customer), "?status="))).containsExactlyInAnyOrder(open.getId(), closed.getId());
+        assertThat(ids(list(as(customer), "?status=CLOSED,"))).containsExactly(closed.getId());
+        assertThat(ids(list(as(customer), "?status=&status=CLOSED"))).containsExactly(closed.getId());
+    }
+
+    @Test
+    void commaSeparatedStatusesAreAccepted() {
+        Ticket open = ticketIn(TicketStatus.OPEN, customer);
+        Ticket closed = ticketIn(TicketStatus.CLOSED, customer);
+        ticketIn(TicketStatus.ANSWERED, customer);
+        em.clear();
+
+        assertThat(ids(list(as(customer), "?status=OPEN,CLOSED"))).containsExactlyInAnyOrder(open.getId(), closed.getId());
+    }
+
+    @Test
+    void unknownStatusIsRejectedWithoutEchoingIt() throws Exception {
+        for (String query : new String[] {"?status=NOT_A_STATUS_MARKER", "?status=OPEN,BOGUS_MARKER",
+                "?status=OPEN&status=BOGUS_MARKER"}) {
+            MvcTestResult result = list(as(customer), query);
+
+            assertThat(result).hasStatus(HttpStatus.BAD_REQUEST).hasContentType(MediaType.APPLICATION_PROBLEM_JSON);
+            assertThat(result).bodyJson().extractingPath("$.errors[*].field").asArray().containsOnly("status");
+            assertThat(result.getResponse().getContentAsString())
+                    .doesNotContain("NOT_A_STATUS_MARKER").doesNotContain("BOGUS_MARKER");
+        }
+    }
+
+    @Test
+    void lowercaseStatusIsRejected() {
+        // Spring MVC converts enums with the case-sensitive core converter.
+        MvcTestResult result = list(as(customer), "?status=open");
+
+        assertThat(result).hasStatus(HttpStatus.BAD_REQUEST);
+        assertThat(result).bodyJson().extractingPath("$.errors[*].field").asArray().containsOnly("status");
+    }
+
+    @Test
+    void listItemsShowNoAssigneeOrVersion() throws Exception {
+        ticketIn(TicketStatus.ANSWERED, customer);
+        em.clear();
+
+        String body = list(as(customer), "").getResponse().getContentAsString();
+
+        List<Map<String, Object>> items = JsonPath.read(body, "$");
+        assertThat(items).hasSize(1);
+        assertThat(items.getFirst()).containsOnlyKeys("id", "subject", "category", "referenceNumber", "status",
+                "createdAt", "lastMessageAt");
+        assertThat(items.getFirst()).containsEntry("status", "ANSWERED");
+        assertThat(body).doesNotContain("Ticket Agent").doesNotContain("ticket-test-agent@example.com");
+    }
+
+    // --- FR-06 post a message ---
+
+    @ParameterizedTest(name = "{0} -> {1}")
+    @CsvSource({
+            "ANSWERED, CUSTOMER_REPLIED",          // TR-03
+            "OPEN, OPEN",                          // TR-04
+            "CUSTOMER_REPLIED, CUSTOMER_REPLIED",  // TR-05
+            "CLOSED, CUSTOMER_REPLIED"             // TR-06
+    })
+    void customerMessageSetsStatus(TicketStatus from, TicketStatus to) {
+        Ticket ticket = ticketIn(from, customer);
+        em.clear();
+
+        MvcTestResult result = postMessage(as(customer), ticket.getId(), messageJson("Hello"));
+
+        assertThat(result).hasStatusOk().hasContentType(MediaType.APPLICATION_JSON);
+        assertThat(result).bodyJson().extractingPath("$.status").isEqualTo(to.name());
+    }
+
+    @Test
+    void reopeningAClosedTicketKeepsTheAssignee() {
+        Ticket ticket = ticketIn(TicketStatus.CLOSED, customer);
+        long version = ticket.getVersion();
+        Instant updatedAt = ticket.getUpdatedAt();
+        em.clear();
+
+        assertThat(postMessage(as(customer), ticket.getId(), messageJson("Reopen please"))).hasStatusOk();
+        em.flush();
+        em.clear();
+
+        Ticket stored = tickets.findById(ticket.getId()).orElseThrow();
+        assertThat(stored.getStatus()).isEqualTo(TicketStatus.CUSTOMER_REPLIED);
+        assertThat(stored.getAssignee().getId()).isEqualTo(agent.getId());
+        assertThat(stored.getVersion()).isEqualTo(version + 1);
+        assertThat(stored.getUpdatedAt()).isAfter(updatedAt);
+    }
+
+    @Test
+    void newMessageIsLastInThreadAndSetsLastMessageAt() throws Exception {
+        Ticket ticket = ticketIn(TicketStatus.ANSWERED, customer);
+        em.clear();
+
+        MvcTestResult result = postMessage(as(customer), ticket.getId(), messageJson("  New\nmessage  "));
+
+        String body = result.getResponse().getContentAsString();
+        List<Map<String, Object>> thread = JsonPath.read(body, "$.messages");
+        assertThat(thread).hasSize(3);
+        assertThat(thread.getLast()).containsEntry("body", "  New\nmessage  ").containsEntry("authorRole", "CUSTOMER");
+        assertThat(JsonPath.<String>read(body, "$.lastMessageAt")).isEqualTo(thread.getLast().get("createdAt"));
+    }
+
+    @Test
+    void postResponseEqualsReadResponse() throws Exception {
+        Ticket ticket = ticketIn(TicketStatus.ANSWERED, customer);
+        em.clear();
+
+        MvcTestResult posted = postMessage(as(customer), ticket.getId(), messageJson("Body"));
+        assertThat(posted).hasStatusOk();
+        // The GET must read from the database, not from the shared persistence context.
+        em.flush();
+        em.clear();
+        MvcTestResult read = mvc.get().uri(TICKETS + "/" + ticket.getId()).with(as(customer)).exchange();
+
+        assertThat(read).hasStatusOk();
+        assertThat(read.getResponse().getContentAsString()).isEqualTo(posted.getResponse().getContentAsString());
+    }
+
+    @Test
+    void messageBodyAtTheLimitIsAccepted() {
+        Ticket ticket = openTicket(customer);
+
+        assertThat(postMessage(as(customer), ticket.getId(), messageJson("m".repeat(Message.BODY_MAX_LENGTH))))
+                .hasStatusOk();
+    }
+
+    @Test
+    void invalidMessageBodiesAreRejected() {
+        long id = openTicket(customer).getId();
+        String tooLong = "m".repeat(Message.BODY_MAX_LENGTH + 1);
+        String paddedTooLong = " " + "m".repeat(Message.BODY_MAX_LENGTH);
+
+        assertValidationError(postMessage(as(customer), id, "{}"), "body", null);
+        assertValidationError(postMessage(as(customer), id, messageJson(null)), "body", null);
+        assertValidationError(postMessage(as(customer), id, messageJson("  \n\t ")), "body", null);
+        assertValidationError(postMessage(as(customer), id, messageJson("body-marker\u0000x")), "body", "body-marker");
+        assertValidationError(postMessage(as(customer), id, messageJson(tooLong)), "body", tooLong);
+        assertValidationError(postMessage(as(customer), id, messageJson(paddedTooLong)), "body", paddedTooLong.strip());
+        assertThat(messages.findThread(id)).hasSize(1);
+    }
+
+    @Test
+    void messageToForeignAndMissingTicketGetsIdenticalNotFound() throws Exception {
+        Ticket ticket = openTicket(customer);
+
+        MvcTestResult foreign = postMessage(as(otherCustomer), ticket.getId(), messageJson("Hi"));
+        assertThat(messages.findThread(ticket.getId())).hasSize(1);
+
+        em.createQuery("delete from Message m where m.ticket.id = :id").setParameter("id", ticket.getId()).executeUpdate();
+        em.createQuery("delete from Ticket t where t.id = :id").setParameter("id", ticket.getId()).executeUpdate();
+        em.clear();
+        MvcTestResult missing = postMessage(as(customer), ticket.getId(), messageJson("Hi"));
+
+        assertThat(foreign).hasStatus(HttpStatus.NOT_FOUND).hasContentType(MediaType.APPLICATION_PROBLEM_JSON);
+        assertThat(foreign).bodyJson().extractingPath("$.detail").isEqualTo("Ticket not found.");
+        assertThat(missing.getResponse().getContentAsString()).isEqualTo(foreign.getResponse().getContentAsString());
+    }
+
     // --- security ---
 
     @Test
     void noTokenIsUnauthorized() {
         assertThat(create(null, json("Subject", "GENERAL", null, "Body"))).hasStatus(HttpStatus.UNAUTHORIZED);
         assertThat(mvc.get().uri(TICKETS + "/1").exchange()).hasStatus(HttpStatus.UNAUTHORIZED);
+        assertThat(list(null, "")).hasStatus(HttpStatus.UNAUTHORIZED);
+        assertThat(postMessage(null, 1L, messageJson("Hi"))).hasStatus(HttpStatus.UNAUTHORIZED);
     }
 
     @Test
@@ -314,6 +529,9 @@ class CustomerTicketControllerTest {
         assertThat(create(as(agent), json("Subject", "GENERAL", null, "Body"))).hasStatus(HttpStatus.FORBIDDEN);
         assertThat(mvc.get().uri(TICKETS + "/" + ticket.getId()).with(as(agent)).exchange())
                 .hasStatus(HttpStatus.FORBIDDEN);
+        assertThat(list(as(agent), "")).hasStatus(HttpStatus.FORBIDDEN);
+        assertThat(postMessage(as(agent), ticket.getId(), messageJson("Hi"))).hasStatus(HttpStatus.FORBIDDEN);
+        assertThat(messages.findThread(ticket.getId())).hasSize(1);
     }
 
     // --- inconsistent token user: 500 ---
@@ -349,9 +567,62 @@ class CustomerTicketControllerTest {
         return ticket;
     }
 
+    /**
+     * A ticket of {@code owner} in the given status, reached through the domain methods with every
+     * message saved. ANSWERED, CUSTOMER_REPLIED and CLOSED are assigned to {@link #agent} (BR-09).
+     */
+    private Ticket ticketIn(TicketStatus status, User owner) {
+        OpenedTicket opened = Ticket.open(owner, "Subject", TicketCategory.GENERAL, null, "First");
+        Ticket ticket = tickets.save(opened.ticket());
+        messages.save(opened.firstMessage());
+        if (status != TicketStatus.OPEN) {
+            messages.save(ticket.postMessage(agent, "Agent reply"));
+        }
+        if (status == TicketStatus.CUSTOMER_REPLIED) {
+            messages.save(ticket.postMessage(owner, "Customer reply"));
+        }
+        if (status == TicketStatus.CLOSED) {
+            ticket.changeStatus(TicketStatus.CLOSED);
+        }
+        em.flush();
+        return ticket;
+    }
+
+    private void setLastMessageAt(Ticket ticket, Instant lastMessageAt) {
+        em.createNativeQuery("update tickets set last_message_at = :lastMessageAt where id = :id")
+                .setParameter("lastMessageAt", lastMessageAt)
+                .setParameter("id", ticket.getId())
+                .executeUpdate();
+    }
+
     private MvcTestResult create(RequestPostProcessor auth, String json) {
         var request = mvc.post().uri(TICKETS).contentType(MediaType.APPLICATION_JSON).content(json);
         return auth == null ? request.exchange() : request.with(auth).exchange();
+    }
+
+    private MvcTestResult list(RequestPostProcessor auth, String query) {
+        var request = mvc.get().uri(TICKETS + query);
+        return auth == null ? request.exchange() : request.with(auth).exchange();
+    }
+
+    private MvcTestResult postMessage(RequestPostProcessor auth, long ticketId, String json) {
+        var request = mvc.post().uri(TICKETS + "/" + ticketId + "/messages")
+                .contentType(MediaType.APPLICATION_JSON).content(json);
+        return auth == null ? request.exchange() : request.with(auth).exchange();
+    }
+
+    private static List<Long> ids(MvcTestResult result) {
+        assertThat(result).hasStatusOk();
+        try {
+            List<Number> ids = JsonPath.read(result.getResponse().getContentAsString(), "$[*].id");
+            return ids.stream().map(Number::longValue).toList();
+        } catch (UnsupportedEncodingException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private static String messageJson(String body) {
+        return "{\"body\":" + quote(body) + "}";
     }
 
     /** A token for {@code user} with the authority matching their role. */

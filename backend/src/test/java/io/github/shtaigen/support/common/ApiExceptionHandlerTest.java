@@ -6,6 +6,7 @@ import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.web.context.request.ServletWebRequest;
@@ -32,6 +33,24 @@ class ApiExceptionHandlerTest {
         BadCredentialsException ex = new BadCredentialsException("bad");
 
         assertThat(catchThrowable(() -> handler.handleUnexpected(ex, request))).isSameAs(ex);
+    }
+
+    @Test
+    void optimisticLockingFailureBecomesConflictWithFixedDetail() {
+        ObjectOptimisticLockingFailureException ex =
+                new ObjectOptimisticLockingFailureException("SecretEntityMarker", 4711L);
+
+        ResponseEntity<Object> response = handler.handleOptimisticLockingFailure(ex, request);
+
+        assertThat(response).isNotNull();
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        ProblemDetail problem = (ProblemDetail) response.getBody();
+        assertThat(problem).isNotNull();
+        assertThat(problem.getStatus()).isEqualTo(409);
+        assertThat(problem.getTitle()).isEqualTo("Conflict");
+        assertThat(problem.getDetail()).isEqualTo("The data was changed by another request. Reload it and try again.");
+        assertThat(problem.getProperties()).isNull();
+        assertThat(problem.toString()).doesNotContain("SecretEntityMarker").doesNotContain("4711");
     }
 
     @Test

@@ -3,13 +3,18 @@ package io.github.shtaigen.support.ticket;
 import io.github.shtaigen.support.user.User;
 import io.github.shtaigen.support.user.UserRepository;
 import io.github.shtaigen.support.user.UserRole;
+import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collection;
+import java.util.EnumSet;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 
 /**
- * Customer ticket operations (FR-03, FR-05). The caller's id comes from the token; every lookup
+ * Customer ticket operations (FR-03..FR-06). The caller's id comes from the token; every lookup
  * of a ticket is restricted to that customer in the query (BR-01).
  */
 @Service
@@ -52,6 +57,39 @@ class CustomerTicketService {
     CustomerTicketResponse get(long customerId, long ticketId) {
         Ticket ticket = tickets.findByIdAndCustomerId(ticketId, customerId)
                 .orElseThrow(TicketNotFoundException::new);
+        return CustomerTicketResponse.from(ticket, messages.findThread(ticket.getId()));
+    }
+
+    /**
+     * The customer's tickets, newest activity first (FR-04, NFR-05).
+     *
+     * @param statuses the status filter; null elements (empty query values) are ignored, and no
+     *                 remaining status means all statuses
+     */
+    @Transactional(readOnly = true)
+    List<CustomerTicketSummary> list(long customerId, @Nullable Collection<TicketStatus> statuses) {
+        Set<TicketStatus> filter = EnumSet.noneOf(TicketStatus.class);
+        if (statuses != null) {
+            statuses.stream().filter(Objects::nonNull).forEach(filter::add);
+        }
+        return filter.isEmpty()
+                ? tickets.findSummariesOfCustomer(customerId)
+                : tickets.findSummariesOfCustomerInStatuses(customerId, filter);
+    }
+
+    /**
+     * Adds a customer message to an own ticket (FR-06, TR-03..TR-06). A concurrent change to the
+     * ticket makes the commit fail with an optimistic-locking conflict, and the message is rolled
+     * back with it (BR-15).
+     *
+     * @throws TicketNotFoundException if the ticket is missing or not owned by the customer
+     */
+    @Transactional
+    CustomerTicketResponse postMessage(long customerId, long ticketId, PostMessageRequest request) {
+        Ticket ticket = tickets.findByIdAndCustomerId(ticketId, customerId)
+                .orElseThrow(TicketNotFoundException::new);
+        // Ownership is proven by the query, so the ticket's customer is the caller.
+        messages.save(ticket.postMessage(ticket.getCustomer(), request.body()));
         return CustomerTicketResponse.from(ticket, messages.findThread(ticket.getId()));
     }
 }

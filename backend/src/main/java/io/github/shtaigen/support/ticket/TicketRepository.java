@@ -1,7 +1,11 @@
 package io.github.shtaigen.support.ticket;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 
 public interface TicketRepository extends JpaRepository<Ticket, Long> {
@@ -11,4 +15,24 @@ public interface TicketRepository extends JpaRepository<Ticket, Long> {
      * not found, the same as a missing one (BR-01, ADR-009).
      */
     Optional<Ticket> findByIdAndCustomerId(Long id, Long customerId);
+
+    /**
+     * A customer's tickets in all statuses, newest activity first (FR-04, NFR-05, BR-01).
+     */
+    @Query("select new io.github.shtaigen.support.ticket.CustomerTicketSummary(t.id, t.subject, t.category,"
+            + " t.referenceNumber, t.status, t.createdAt, t.lastMessageAt) from Ticket t"
+            + " where t.customer.id = :customerId order by t.lastMessageAt desc, t.id desc")
+    List<CustomerTicketSummary> findSummariesOfCustomer(@Param("customerId") Long customerId);
+
+    /**
+     * A customer's tickets in the given statuses, newest activity first (FR-04, NFR-05, BR-01).
+     *
+     * @param statuses must not be empty; use {@link #findSummariesOfCustomer} for no filter
+     */
+    @Query("select new io.github.shtaigen.support.ticket.CustomerTicketSummary(t.id, t.subject, t.category,"
+            + " t.referenceNumber, t.status, t.createdAt, t.lastMessageAt) from Ticket t"
+            + " where t.customer.id = :customerId and t.status in :statuses"
+            + " order by t.lastMessageAt desc, t.id desc")
+    List<CustomerTicketSummary> findSummariesOfCustomerInStatuses(@Param("customerId") Long customerId,
+                                                                  @Param("statuses") Collection<TicketStatus> statuses);
 }
