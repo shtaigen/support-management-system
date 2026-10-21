@@ -88,7 +88,9 @@ Common error responses, used by all FRs (details in NFR-03):
 - **401**: no token, or the token is invalid or expired.
 - **403**: the role is not allowed to perform the operation.
 - **404**: the ticket does not exist, or it belongs to another customer (BR-01).
-- **409**: invalid transition (section 2) or an optimistic-locking conflict (BR-15).
+- **409**: invalid transition (section 2) or an optimistic-locking conflict (BR-15). Each of the
+  two causes has its own fixed `detail` text. The response never includes ids, versions or
+  status values.
 
 ### FR-01 Log in
 | Field | Value |
@@ -155,10 +157,10 @@ Common error responses, used by all FRs (details in NFR-03):
 |---|---|
 | Actor | Agent |
 | Description | The agent sees the queue of all tickets. |
-| Inputs | Optional status filter: one or more statuses. Optional assignee filter: a specific agent, or "unassigned". Optional customer filter: a customer id (used by FR-08). All filters can be combined. |
-| Outcome | Matching tickets, sorted by NFR-05. Each item shows id, subject, category, reference number, status, customer name and email, assignee, and `last_message_at`. A customer filter with an id that is not a customer returns an empty list. |
-| Errors | 400 when a filter value is invalid (an unknown status, or a malformed id). 403 when the caller is not an agent. |
-| Source | EI (all tickets, status filter). PD (V1 indexes; "unassigned" agreed in review; customer filter from the OQ-01 resolution). |
+| Inputs | `status` (optional): the same form and rules as in FR-04. `assigneeId` (optional): a user id; only tickets assigned to that user. `unassigned` (optional boolean): `true` returns only tickets without an assignee; `false` is the same as absent. `customerId` (optional): a user id; only that customer's tickets (used by FR-08). All filters combine with AND, so `assigneeId` together with `unassigned=true` returns an empty list. An `assigneeId` that is not an agent, or a `customerId` that is not a customer, returns an empty list, not an error. |
+| Outcome | Matching tickets, sorted by NFR-05. Each item shows id, subject, category, reference number, status, the customer (id, name and email), the assignee (id and name, or none), and `last_message_at`. It does not show the version. |
+| Errors | 400 when a filter value is invalid: an unknown or lowercase status, a malformed id, or an `unassigned` value that is not a boolean. The response names the field and does not echo the value. 403 when the caller is not an agent. |
+| Source | EI (all tickets, status filter). PD (V1 indexes; "unassigned" agreed in review; customer filter from the OQ-01 resolution; parameter names agreed before step 5c). |
 
 ### FR-08 View tickets grouped by customer
 | Field | Value |
@@ -176,9 +178,9 @@ Common error responses, used by all FRs (details in NFR-03):
 | Actor | Agent |
 | Description | The agent opens any ticket. |
 | Inputs | Ticket id. |
-| Outcome | Ticket details (subject, category, reference number, status, customer name and email, assignee, timestamps) and the full thread in chronological order. Each message shows its author's name and role. |
+| Outcome | Ticket details: id, subject, category, reference number, status, the customer (id, name and email), the assignee (id and name, or none), `created_at`, `updated_at`, `last_message_at` and `version`. The version is what FR-11 and FR-12 send back for optimistic locking. The full thread in chronological order (NFR-05); each message shows its body, its time, and its author's name and role. |
 | Errors | 404 when the ticket does not exist. 403 when the caller is not an agent. |
-| Source | EI, PD |
+| Source | EI, PD (version in the view agreed before step 5c) |
 
 ### FR-10 Reply as an agent
 | Field | Value |
@@ -186,9 +188,9 @@ Common error responses, used by all FRs (details in NFR-03):
 | Actor | Agent |
 | Description | The agent adds a message to a ticket. |
 | Inputs | Ticket id. `body` (BR-11). |
-| Outcome | A message authored by the caller. The status becomes ANSWERED (TR-02). If the ticket was unassigned, the caller becomes the assignee (BR-09). `last_message_at` and `updated_at` are set. |
-| Errors | 400 on an invalid body. 404 when the ticket does not exist. 409 when the ticket is CLOSED (BR-06) or on a version conflict. |
-| Source | EI (first reply moves the ticket forward and auto-assigns). PD (agreed in review). |
+| Outcome | A message authored by the caller. The status becomes ANSWERED (TR-02). If the ticket was unassigned, the caller becomes the assignee (BR-09). A reply to a ticket assigned to another agent is allowed and keeps that assignee. `last_message_at` and `updated_at` are set. The response is the updated ticket view, as in FR-09. |
+| Errors | 400 on an invalid body. 404 when the ticket does not exist. 409 when the ticket is CLOSED (BR-06), or when another change to the ticket was committed at the same time (BR-15); the request carries no version. |
+| Source | EI (first reply moves the ticket forward and auto-assigns). PD (agreed in review; no version and the response shape agreed before step 5c). |
 
 ### FR-11 Change status manually
 | Field | Value |
