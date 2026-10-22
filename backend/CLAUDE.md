@@ -29,6 +29,13 @@ root). There is no Testcontainers or in-memory DB: `@SpringBootTest` connects to
 `spring.jpa.open-in-view` is `false`: lazy associations must be loaded inside the
 service/transaction (fetch joins, entity graphs or DTO projections), not in controllers.
 
+When a response shows `version` or `updatedAt` of an entity changed in the same request,
+call `flush()` on the repository before building the response. `@Version` and `@PreUpdate`
+take effect at flush, and a later flush runs `@PreUpdate` again with a new time, so a
+response built before the flush differs from the database. An optimistic-locking conflict
+then surfaces at that flush and still becomes the 409 (ADR-008). Example:
+`AgentTicketService.postMessage`.
+
 ## Deliberately absent
 Lombok and Testcontainers are not in the project on purpose.
 Do not add them (or alternatives) without asking first.

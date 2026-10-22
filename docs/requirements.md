@@ -157,10 +157,10 @@ Common error responses, used by all FRs (details in NFR-03):
 |---|---|
 | Actor | Agent |
 | Description | The agent sees the queue of all tickets. |
-| Inputs | `status` (optional): the same form and rules as in FR-04. `assigneeId` (optional): a user id; only tickets assigned to that user. `unassigned` (optional boolean): `true` returns only tickets without an assignee; `false` is the same as absent. `customerId` (optional): a user id; only that customer's tickets (used by FR-08). All filters combine with AND, so `assigneeId` together with `unassigned=true` returns an empty list. An `assigneeId` that is not an agent, or a `customerId` that is not a customer, returns an empty list, not an error. |
+| Inputs | `status` (optional): the same form and rules as in FR-04. `assigneeId` (optional): a user id; only tickets assigned to that user. `unassigned` (optional boolean, standard Spring conversion: `true`, `on`, `yes`, `1` and `false`, `off`, `no`, `0`, in any case; an empty value is the same as absent): `true` returns only tickets without an assignee; `false` is the same as absent. `customerId` (optional): a user id; only that customer's tickets (used by FR-08). All filters combine with AND, so `assigneeId` together with `unassigned=true` returns an empty list. An `assigneeId` that is not an agent, or a `customerId` that is not a customer, returns an empty list, not an error. |
 | Outcome | Matching tickets, sorted by NFR-05. Each item shows id, subject, category, reference number, status, the customer (id, name and email), the assignee (id and name, or none), and `last_message_at`. It does not show the version. |
-| Errors | 400 when a filter value is invalid: an unknown or lowercase status, a malformed id, or an `unassigned` value that is not a boolean. The response names the field and does not echo the value. 403 when the caller is not an agent. |
-| Source | EI (all tickets, status filter). PD (V1 indexes; "unassigned" agreed in review; customer filter from the OQ-01 resolution; parameter names agreed before step 5c). |
+| Errors | 400 when a filter value is invalid: an unknown or lowercase status, a malformed id, or an `unassigned` value outside the accepted boolean values. The response names the field and does not echo the value. 403 when the caller is not an agent. |
+| Source | EI (all tickets, status filter). PD (V1 indexes; "unassigned" agreed in review; customer filter from the OQ-01 resolution; parameter names agreed before step 5c; accepted boolean values agreed in the step 5c plan review). |
 
 ### FR-08 View tickets grouped by customer
 | Field | Value |

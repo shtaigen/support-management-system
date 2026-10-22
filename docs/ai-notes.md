@@ -100,3 +100,7 @@ Lesson: Know where the flush happens before deciding where an optimistic-locking
 ## 2026-10-20: Reconcile agent reports with hard numbers
 The agent reported 23 new controller test runs, but the build total grew by only 20. Asked to reconcile, it counted with git diff and found 18; no test had been lost. A mutation check (removing @Transactional from the service) then confirmed that the conflict test fails with 500 instead of 409.
 Lesson: Check an agent's summary against build totals and diffs, and prove a test's purpose by breaking the code it guards.
+
+## 2026-10-21: A mutation check showed why the reply flushes
+The agent reply (FR-10) returns version and updatedAt, so the service calls tickets.flush() before building the response. The conflict test does not need that line, because the optimistic-locking failure still surfaces at commit. Only a mutation check showed what the line protects: without it the POST response had an updatedAt a few milliseconds earlier than the following GET, because @PreUpdate ran again at the final flush.
+Lesson: For every line added to avoid a subtle pitfall, ask which test fails without it; if none does, the line will be deleted later as dead code.
