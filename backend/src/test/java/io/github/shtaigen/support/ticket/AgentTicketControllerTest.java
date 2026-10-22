@@ -8,12 +8,14 @@ import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
@@ -485,6 +487,303 @@ class AgentTicketControllerTest {
         assertNotFound(postMessage(as(agent), Long.MAX_VALUE, messageJson("Hi")));
     }
 
+    // --- FR-11 status change ---
+
+    @ParameterizedTest
+    @EnumSource(value = TicketStatus.class, names = {"OPEN", "ANSWERED", "CUSTOMER_REPLIED"})
+    void agentClosesTicketAndKeepsTheAssignee(TicketStatus from) throws Exception {
+        User assignee = from == TicketStatus.OPEN ? null : agent;
+        Ticket ticket = ticketIn(from, customer, assignee);
+        long version = ticket.getVersion();
+        Instant updatedAt = ticket.getUpdatedAt();
+        em.clear();
+
+        MvcTestResult result = putStatus(as(otherAgent), ticket.getId(), statusJson(TicketStatus.CLOSED, version));
+
+        assertThat(result).hasStatusOk().hasContentType(MediaType.APPLICATION_JSON);
+        assertThat(result).bodyJson().extractingPath("$.status").isEqualTo("CLOSED");
+        assertThat(result).bodyJson().extractingPath("$.assignee").isEqualTo(assigneeView(assignee));
+        assertThat(jsonLong(result, "$.version")).isEqualTo(version + 1);
+        assertThat(jsonInstant(result, "$.updatedAt")).isAfter(updatedAt);
+        assertStored(ticket, version + 1, TicketStatus.CLOSED, assignee);
+    }
+
+    @Test
+    void agentReopensClosedTicketAndKeepsTheAssignee() throws Exception {
+        Ticket ticket = ticketIn(TicketStatus.CLOSED, customer, agent);
+        long version = ticket.getVersion();
+        Instant updatedAt = ticket.getUpdatedAt();
+        em.clear();
+
+        MvcTestResult result = putStatus(as(otherAgent), ticket.getId(), statusJson(TicketStatus.OPEN, version));
+
+        assertThat(result).hasStatusOk();
+        assertThat(result).bodyJson().extractingPath("$.status").isEqualTo("OPEN");
+        assertThat(result).bodyJson().extractingPath("$.assignee").isEqualTo(assigneeView(agent));
+        assertThat(jsonLong(result, "$.version")).isEqualTo(version + 1);
+        assertThat(jsonInstant(result, "$.updatedAt")).isAfter(updatedAt);
+        assertStored(ticket, version + 1, TicketStatus.OPEN, agent);
+    }
+
+    @Test
+    void statusResponseEqualsReadResponse() throws Exception {
+        Ticket ticket = ticketIn(TicketStatus.ANSWERED, customer, agent);
+        em.clear();
+
+        MvcTestResult put = putStatus(as(agent), ticket.getId(), statusJson(TicketStatus.CLOSED, ticket.getVersion()));
+        assertThat(put).hasStatusOk();
+        // The GET must read from the database, not from the shared persistence context.
+        em.flush();
+        em.clear();
+        MvcTestResult read = get(as(agent), ticket.getId());
+
+        assertThat(read).hasStatusOk();
+        assertThat(read.getResponse().getContentAsString()).isEqualTo(put.getResponse().getContentAsString());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"CLOSED, CLOSED", "OPEN, OPEN", "OPEN, ANSWERED", "OPEN, CUSTOMER_REPLIED",
+            "CLOSED, ANSWERED", "CLOSED, CUSTOMER_REPLIED"})
+    void manualTransitionOutsideTr07AndTr08IsConflict(TicketStatus from, TicketStatus target) throws Exception {
+        Ticket ticket = ticketIn(from, customer, null);
+        long version = ticket.getVersion();
+        Instant updatedAt = ticket.getUpdatedAt();
+        em.clear();
+
+        MvcTestResult result = putStatus(as(agent), ticket.getId(), statusJson(target, version));
+
+        assertTransitionConflict(result);
+        assertThat(result.getResponse().getContentAsString()).doesNotContain(from.name()).doesNotContain(target.name());
+        assertUnchanged(ticket, version, updatedAt, from, null);
+    }
+
+    @Test
+    void staleVersionInStatusChangeIsLockingConflict() throws Exception {
+        Ticket ticket = ticketIn(TicketStatus.ANSWERED, customer, agent);
+        long version = ticket.getVersion();
+        Instant updatedAt = ticket.getUpdatedAt();
+        em.clear();
+
+        assertLockingConflict(putStatus(as(agent), ticket.getId(), statusJson(TicketStatus.CLOSED, version - 1)));
+        assertUnchanged(ticket, version, updatedAt, TicketStatus.ANSWERED, agent);
+    }
+
+    @Test
+    void staleVersionIsCheckedBeforeTheTransition() throws Exception {
+        Ticket ticket = ticketIn(TicketStatus.CLOSED, customer, agent);
+        long version = ticket.getVersion();
+        Instant updatedAt = ticket.getUpdatedAt();
+        em.clear();
+
+        assertLockingConflict(putStatus(as(agent), ticket.getId(), statusJson(TicketStatus.CLOSED, version - 1)));
+        assertUnchanged(ticket, version, updatedAt, TicketStatus.CLOSED, agent);
+    }
+
+    @Test
+    void missingStatusFieldsAreRejected() {
+        long id = ticketIn(TicketStatus.OPEN, customer, null).getId();
+
+        assertValidationError(putStatus(as(agent), id, "{\"version\":0}"), "status", null);
+        assertValidationError(putStatus(as(agent), id, "{\"status\":\"CLOSED\"}"), "version", null);
+        assertThat(putStatus(as(agent), id, "{\"status\":null,\"version\":null}")).hasStatus(HttpStatus.BAD_REQUEST)
+                .bodyJson().extractingPath("$.errors[*].field").asArray().containsExactlyInAnyOrder("status", "version");
+    }
+
+    @Test
+    void statusChangeOfMissingTicketIsNotFound() {
+        assertNotFound(putStatus(as(agent), Long.MAX_VALUE, statusJson(TicketStatus.CLOSED, 0)));
+        assertNotFound(putStatus(as(agent), Long.MAX_VALUE, statusJson(TicketStatus.CLOSED, 4711)));
+    }
+
+    // --- FR-12 assignment ---
+
+    @Test
+    void agentAssignsUnassignedTicket() throws Exception {
+        assertAssignment(ticketIn(TicketStatus.OPEN, customer, null), otherAgent);
+    }
+
+    @Test
+    void agentReassignsTicketToAnotherAgent() throws Exception {
+        assertAssignment(ticketIn(TicketStatus.ANSWERED, customer, agent), otherAgent);
+    }
+
+    @Test
+    void closedTicketCanBeAssignedAndStaysClosed() throws Exception {
+        assertAssignment(ticketIn(TicketStatus.CLOSED, customer, agent), otherAgent);
+    }
+
+    @Test
+    void assigningTheCurrentAssigneeChangesNothing() throws Exception {
+        Ticket ticket = ticketIn(TicketStatus.ANSWERED, customer, agent);
+        long version = ticket.getVersion();
+        Instant updatedAt = ticket.getUpdatedAt();
+        em.clear();
+
+        MvcTestResult result = putAssignee(as(otherAgent), ticket.getId(), assigneeJson(agent.getId(), version));
+
+        assertThat(result).hasStatusOk();
+        assertThat(result).bodyJson().extractingPath("$.assignee").isEqualTo(assigneeView(agent));
+        // The response, not only the database: @PreUpdate would also change updatedAt in memory.
+        assertThat(jsonLong(result, "$.version")).isEqualTo(version);
+        assertThat(jsonInstant(result, "$.updatedAt")).isEqualTo(updatedAt);
+        // The request succeeded, so a commit would flush; flush here to show nothing is pending.
+        em.flush();
+        assertUnchanged(ticket, version, updatedAt, TicketStatus.ANSWERED, agent);
+    }
+
+    @Test
+    void currentAssigneeWithStaleVersionIsLockingConflict() throws Exception {
+        Ticket ticket = ticketIn(TicketStatus.ANSWERED, customer, agent);
+        long version = ticket.getVersion();
+        Instant updatedAt = ticket.getUpdatedAt();
+        em.clear();
+
+        assertLockingConflict(putAssignee(as(agent), ticket.getId(), assigneeJson(agent.getId(), version - 1)));
+        assertUnchanged(ticket, version, updatedAt, TicketStatus.ANSWERED, agent);
+    }
+
+    @Test
+    void staleVersionInAssignmentIsLockingConflict() throws Exception {
+        Ticket ticket = ticketIn(TicketStatus.ANSWERED, customer, agent);
+        long version = ticket.getVersion();
+        Instant updatedAt = ticket.getUpdatedAt();
+        em.clear();
+
+        assertLockingConflict(putAssignee(as(agent), ticket.getId(), assigneeJson(otherAgent.getId(), version - 1)));
+        assertUnchanged(ticket, version, updatedAt, TicketStatus.ANSWERED, agent);
+    }
+
+    @Test
+    void customerAndMissingUserAsAssigneeGetTheSameBadRequest() throws Exception {
+        Ticket ticket = ticketIn(TicketStatus.OPEN, customer, null);
+        long version = ticket.getVersion();
+        Instant updatedAt = ticket.getUpdatedAt();
+        em.clear();
+
+        MvcTestResult customerId = putAssignee(as(agent), ticket.getId(), assigneeJson(customer.getId(), version));
+        MvcTestResult missingId = putAssignee(as(agent), ticket.getId(), assigneeJson(Long.MAX_VALUE, version));
+        MvcTestResult beanValidation = putAssignee(as(agent), ticket.getId(), "{\"version\":" + version + "}");
+
+        assertThat(customerId).hasStatus(HttpStatus.BAD_REQUEST).hasContentType(MediaType.APPLICATION_PROBLEM_JSON);
+        assertThat(customerId).bodyJson().extractingPath("$.errors")
+                .isEqualTo(List.of(Map.of("field", "assigneeId", "message", "must be an existing agent")));
+        String body = customerId.getResponse().getContentAsString();
+        assertThat(missingId.getResponse().getContentAsString()).isEqualTo(body);
+        assertThat(body).doesNotContain(String.valueOf(Long.MAX_VALUE));
+        // The same shape as a bean-validation 400.
+        assertValidationError(beanValidation, "assigneeId", null);
+        Map<String, Object> json = JsonPath.read(body, "$");
+        Map<String, Object> beanJson = JsonPath.read(beanValidation.getResponse().getContentAsString(), "$");
+        assertThat(json.keySet()).isEqualTo(beanJson.keySet());
+        assertThat(json).containsEntry("detail", beanJson.get("detail")).containsEntry("title", beanJson.get("title"));
+        assertUnchanged(ticket, version, updatedAt, TicketStatus.OPEN, null);
+    }
+
+    @Test
+    void missingAssigneeFieldsAreRejected() {
+        long id = ticketIn(TicketStatus.OPEN, customer, null).getId();
+
+        assertValidationError(putAssignee(as(agent), id, "{\"version\":0}"), "assigneeId", null);
+        assertValidationError(putAssignee(as(agent), id, "{\"assigneeId\":" + agent.getId() + "}"), "version", null);
+    }
+
+    @Test
+    void assigneeIsCheckedBeforeTheTicket() {
+        assertValidationError(putAssignee(as(agent), Long.MAX_VALUE, assigneeJson(customer.getId(), 0)),
+                "assigneeId", null);
+        assertNotFound(putAssignee(as(agent), Long.MAX_VALUE, assigneeJson(agent.getId(), 0)));
+        assertNotFound(putAssignee(as(agent), Long.MAX_VALUE, assigneeJson(agent.getId(), 4711)));
+    }
+
+    @Test
+    void assignResponseEqualsReadResponse() throws Exception {
+        Ticket ticket = ticketIn(TicketStatus.OPEN, customer, null);
+        em.clear();
+
+        MvcTestResult put = putAssignee(as(agent), ticket.getId(), assigneeJson(agent.getId(), ticket.getVersion()));
+        assertThat(put).hasStatusOk();
+        em.flush();
+        em.clear();
+        MvcTestResult read = get(as(agent), ticket.getId());
+
+        assertThat(read).hasStatusOk();
+        assertThat(read.getResponse().getContentAsString()).isEqualTo(put.getResponse().getContentAsString());
+    }
+
+    // --- FR-11 / FR-12 unreadable bodies ---
+
+    @Test
+    void unreadableStatusBodiesGetTheGenericBadRequest() throws Exception {
+        Ticket ticket = ticketIn(TicketStatus.OPEN, customer, null);
+        long version = ticket.getVersion();
+        Instant updatedAt = ticket.getUpdatedAt();
+        String[][] cases = {
+                {"{\"status\":\"NOT_A_STATUS_MARKER\",\"version\":" + version + "}", "NOT_A_STATUS_MARKER"},
+                {"{\"status\":\"closed\",\"version\":" + version + "}", "closed"},
+                {"{\"status\":\"CLOSED\",\"version\":\"ver-marker\"}", "ver-marker"},
+        };
+        for (String[] c : cases) {
+            assertUnreadableBody(putStatus(as(agent), ticket.getId(), c[0]), c[1]);
+        }
+        assertUnchanged(ticket, version, updatedAt, TicketStatus.OPEN, null);
+    }
+
+    @Test
+    void unreadableAssigneeBodiesGetTheGenericBadRequest() throws Exception {
+        Ticket ticket = ticketIn(TicketStatus.OPEN, customer, null);
+        long version = ticket.getVersion();
+        Instant updatedAt = ticket.getUpdatedAt();
+        String[][] cases = {
+                {"{\"assigneeId\":\"agent-marker\",\"version\":" + version + "}", "agent-marker"},
+                {"{\"assigneeId\":" + agent.getId() + ",\"version\":\"ver-marker\"}", "ver-marker"},
+        };
+        for (String[] c : cases) {
+            assertUnreadableBody(putAssignee(as(agent), ticket.getId(), c[0]), c[1]);
+        }
+        assertUnchanged(ticket, version, updatedAt, TicketStatus.OPEN, null);
+    }
+
+    // Jackson would truncate floats into Long fields (0.9 -> 0) unless ACCEPT_FLOAT_AS_INT is off
+    // (application.yaml). Version 0 and the agent's id are valid here, so truncation would give 200.
+
+    @Test
+    void floatVersionInStatusChangeIsRejected() throws Exception {
+        Ticket ticket = ticketIn(TicketStatus.OPEN, customer, null);
+        assertThat(ticket.getVersion()).isZero();
+
+        assertUnreadableBody(putStatus(as(agent), ticket.getId(), "{\"status\":\"CLOSED\",\"version\":0.9}"), "0.9");
+        assertUnchanged(ticket, 0, ticket.getUpdatedAt(), TicketStatus.OPEN, null);
+    }
+
+    @Test
+    void floatVersionInAssignmentIsRejected() throws Exception {
+        Ticket ticket = ticketIn(TicketStatus.OPEN, customer, null);
+        assertThat(ticket.getVersion()).isZero();
+
+        assertUnreadableBody(putAssignee(as(agent), ticket.getId(),
+                "{\"assigneeId\":" + agent.getId() + ",\"version\":0.9}"), "0.9");
+        assertUnchanged(ticket, 0, ticket.getUpdatedAt(), TicketStatus.OPEN, null);
+    }
+
+    @Test
+    void floatAssigneeIdIsRejected() throws Exception {
+        Ticket ticket = ticketIn(TicketStatus.OPEN, customer, null);
+        String fraction = agent.getId() + ".9";
+
+        assertUnreadableBody(putAssignee(as(agent), ticket.getId(),
+                "{\"assigneeId\":" + fraction + ",\"version\":0}"), fraction);
+        assertUnchanged(ticket, 0, ticket.getUpdatedAt(), TicketStatus.OPEN, null);
+    }
+
+    @Test
+    void integralFloatVersionIsRejected() throws Exception {
+        // Without the setting, 1.0 would be read as 1 and give the optimistic-locking 409.
+        Ticket ticket = ticketIn(TicketStatus.OPEN, customer, null);
+
+        assertUnreadableBody(putStatus(as(agent), ticket.getId(), "{\"status\":\"CLOSED\",\"version\":1.0}"), "1.0");
+        assertUnchanged(ticket, 0, ticket.getUpdatedAt(), TicketStatus.OPEN, null);
+    }
+
     // --- inconsistent token user: 500 ---
 
     @Test
@@ -512,7 +811,12 @@ class AgentTicketControllerTest {
         assertThat(list(null, "")).hasStatus(HttpStatus.UNAUTHORIZED);
         assertThat(mvc.get().uri(TICKETS + "/" + ticket.getId()).exchange()).hasStatus(HttpStatus.UNAUTHORIZED);
         assertThat(postMessage(null, ticket.getId(), messageJson("Hi"))).hasStatus(HttpStatus.UNAUTHORIZED);
+        assertThat(putStatus(null, ticket.getId(), statusJson(TicketStatus.CLOSED, ticket.getVersion())))
+                .hasStatus(HttpStatus.UNAUTHORIZED);
+        assertThat(putAssignee(null, ticket.getId(), assigneeJson(agent.getId(), ticket.getVersion())))
+                .hasStatus(HttpStatus.UNAUTHORIZED);
         assertThat(messages.findThread(ticket.getId())).hasSize(1);
+        assertUnchanged(ticket, ticket.getVersion(), ticket.getUpdatedAt(), TicketStatus.OPEN, null);
     }
 
     @Test
@@ -522,7 +826,12 @@ class AgentTicketControllerTest {
         assertThat(list(as(customer), "")).hasStatus(HttpStatus.FORBIDDEN);
         assertThat(get(as(customer), ticket.getId())).hasStatus(HttpStatus.FORBIDDEN);
         assertThat(postMessage(as(customer), ticket.getId(), messageJson("Hi"))).hasStatus(HttpStatus.FORBIDDEN);
+        assertThat(putStatus(as(customer), ticket.getId(), statusJson(TicketStatus.CLOSED, ticket.getVersion())))
+                .hasStatus(HttpStatus.FORBIDDEN);
+        assertThat(putAssignee(as(customer), ticket.getId(), assigneeJson(agent.getId(), ticket.getVersion())))
+                .hasStatus(HttpStatus.FORBIDDEN);
         assertThat(messages.findThread(ticket.getId())).hasSize(1);
+        assertUnchanged(ticket, ticket.getVersion(), ticket.getUpdatedAt(), TicketStatus.OPEN, null);
     }
 
     // --- helpers ---
@@ -571,6 +880,124 @@ class AgentTicketControllerTest {
         var request = mvc.post().uri(TICKETS + "/" + ticketId + "/messages")
                 .contentType(MediaType.APPLICATION_JSON).content(json);
         return auth == null ? request.exchange() : request.with(auth).exchange();
+    }
+
+    private MvcTestResult putStatus(RequestPostProcessor auth, long ticketId, String json) {
+        var request = mvc.put().uri(TICKETS + "/" + ticketId + "/status")
+                .contentType(MediaType.APPLICATION_JSON).content(json);
+        return auth == null ? request.exchange() : request.with(auth).exchange();
+    }
+
+    private MvcTestResult putAssignee(RequestPostProcessor auth, long ticketId, String json) {
+        var request = mvc.put().uri(TICKETS + "/" + ticketId + "/assignee")
+                .contentType(MediaType.APPLICATION_JSON).content(json);
+        return auth == null ? request.exchange() : request.with(auth).exchange();
+    }
+
+    /**
+     * Assigns {@code ticket} to {@code newAssignee} and checks that only the assignee, version and
+     * updatedAt change; status, lastMessageAt and the thread stay as they were.
+     */
+    private void assertAssignment(Ticket ticket, User newAssignee) throws Exception {
+        TicketStatus status = ticket.getStatus();
+        long version = ticket.getVersion();
+        Instant updatedAt = ticket.getUpdatedAt();
+        Instant lastMessageAt = ticket.getLastMessageAt();
+        List<Long> thread = messageIds(ticket);
+        em.clear();
+
+        MvcTestResult result = putAssignee(as(agent), ticket.getId(), assigneeJson(newAssignee.getId(), version));
+
+        assertThat(result).hasStatusOk().hasContentType(MediaType.APPLICATION_JSON);
+        assertThat(result).bodyJson().extractingPath("$.assignee").isEqualTo(assigneeView(newAssignee));
+        assertThat(result).bodyJson().extractingPath("$.status").isEqualTo(status.name());
+        assertThat(jsonLong(result, "$.version")).isEqualTo(version + 1);
+        assertThat(jsonInstant(result, "$.updatedAt")).isAfter(updatedAt);
+        assertThat(jsonInstant(result, "$.lastMessageAt")).isEqualTo(lastMessageAt);
+        List<Number> responseThread = JsonPath.read(result.getResponse().getContentAsString(), "$.messages[*].id");
+        assertThat(responseThread.stream().map(Number::longValue).toList()).isEqualTo(thread);
+        assertStored(ticket, version + 1, status, newAssignee);
+        assertThat(tickets.findById(ticket.getId()).orElseThrow().getLastMessageAt()).isEqualTo(lastMessageAt);
+        assertThat(messageIds(ticket)).isEqualTo(thread);
+    }
+
+    private List<Long> messageIds(Ticket ticket) {
+        return messages.findThread(ticket.getId()).stream().map(Message::getId).toList();
+    }
+
+    /** After a successful request: flushes what is pending, then reads the ticket from the database. */
+    private void assertStored(Ticket ticket, long version, TicketStatus status, User assignee) {
+        em.flush();
+        em.clear();
+        Ticket stored = tickets.findWithPeopleById(ticket.getId()).orElseThrow();
+        assertThat(stored.getVersion()).isEqualTo(version);
+        assertThat(stored.getStatus()).isEqualTo(status);
+        if (assignee == null) {
+            assertThat(stored.getAssignee()).isNull();
+        } else {
+            assertThat(stored.getAssignee().getId()).isEqualTo(assignee.getId());
+        }
+    }
+
+    private static Map<String, Object> assigneeView(User assignee) {
+        return assignee == null ? null : Map.of("id", assignee.getId().intValue(), "name", assignee.getName());
+    }
+
+    private static long jsonLong(MvcTestResult result, String path) throws UnsupportedEncodingException {
+        return JsonPath.<Number>read(result.getResponse().getContentAsString(), path).longValue();
+    }
+
+    private static Instant jsonInstant(MvcTestResult result, String path) throws UnsupportedEncodingException {
+        return Instant.parse(JsonPath.read(result.getResponse().getContentAsString(), path));
+    }
+
+    private static String statusJson(TicketStatus status, long version) {
+        return "{\"status\":\"" + status + "\",\"version\":" + version + "}";
+    }
+
+    private static String assigneeJson(long assigneeId, long version) {
+        return "{\"assigneeId\":" + assigneeId + ",\"version\":" + version + "}";
+    }
+
+    /**
+     * Reads the ticket from the database. Clears first so nothing comes from the persistence
+     * context, and never flushes: a failed request left the test transaction rollback-only.
+     */
+    private void assertUnchanged(Ticket ticket, long version, Instant updatedAt, TicketStatus status, User assignee) {
+        em.clear();
+        Ticket stored = tickets.findWithPeopleById(ticket.getId()).orElseThrow();
+        assertThat(stored.getVersion()).isEqualTo(version);
+        assertThat(stored.getUpdatedAt()).isEqualTo(updatedAt);
+        assertThat(stored.getStatus()).isEqualTo(status);
+        if (assignee == null) {
+            assertThat(stored.getAssignee()).isNull();
+        } else {
+            assertThat(stored.getAssignee().getId()).isEqualTo(assignee.getId());
+        }
+    }
+
+    private static void assertUnreadableBody(MvcTestResult result, String marker) throws Exception {
+        assertThat(result).as(marker).hasStatus(HttpStatus.BAD_REQUEST).hasContentType(MediaType.APPLICATION_PROBLEM_JSON);
+        assertThat(result).as(marker).bodyJson().extractingPath("$.detail").isEqualTo("Failed to read request");
+        assertThat(result).as(marker).bodyJson().doesNotHavePath("$.errors");
+        assertThat(result.getResponse().getContentAsString()).as(marker).doesNotContain(marker);
+    }
+
+    private static void assertTransitionConflict(MvcTestResult result) throws Exception {
+        assertThat(result).hasStatus(HttpStatus.CONFLICT).hasContentType(MediaType.APPLICATION_PROBLEM_JSON);
+        assertThat(result).bodyJson().extractingPath("$.detail")
+                .isEqualTo("The ticket's current status does not allow this action.");
+        assertThat(result.getMvcResult().getResolvedException()).isInstanceOf(InvalidTicketTransitionException.class);
+        assertThat(result.getResponse().getContentAsString()).doesNotContain("version");
+    }
+
+    private static void assertLockingConflict(MvcTestResult result) throws Exception {
+        assertThat(result).hasStatus(HttpStatus.CONFLICT).hasContentType(MediaType.APPLICATION_PROBLEM_JSON);
+        assertThat(result).bodyJson().extractingPath("$.detail")
+                .isEqualTo("The data was changed by another request. Reload it and try again.");
+        assertThat(result.getMvcResult().getResolvedException()).isInstanceOf(ObjectOptimisticLockingFailureException.class);
+        assertThat(result.getResponse().getContentAsString()).doesNotContain(Ticket.class.getName())
+                .doesNotContain("version");
     }
 
     private static List<Long> ids(MvcTestResult result) {

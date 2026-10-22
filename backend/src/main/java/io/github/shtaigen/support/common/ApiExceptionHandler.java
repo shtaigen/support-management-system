@@ -103,7 +103,8 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
         return handleExceptionInternal(ex, problem, new HttpHeaders(), HttpStatus.INTERNAL_SERVER_ERROR, request);
     }
 
-    private static ProblemDetail validationProblem(List<FieldViolation> errors) {
+    // Also used by InvalidFieldException, so its 400 has the same body.
+    static ProblemDetail validationProblem(List<FieldViolation> errors) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "Validation failed.");
         problem.setProperties(Map.of("errors", errors));
         return problem;

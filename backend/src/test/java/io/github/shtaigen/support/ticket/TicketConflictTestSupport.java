@@ -42,12 +42,13 @@ abstract class TicketConflictTestSupport {
     @Autowired
     protected MockMvcTester mvc;
 
-    // Spring Data repositories are JDK proxies; the spy delegates every unstubbed call to the real
-    // repository proxy, including its transaction and exception translation.
+    // Spring Data repositories are JDK proxies; the spies delegate every unstubbed call to the real
+    // repository proxy, including its transaction and exception translation. Stubs are reset after
+    // each test (MockReset.AFTER, the default).
     @MockitoSpyBean
     protected MessageRepository messages;
 
-    @Autowired
+    @MockitoSpyBean
     protected TicketRepository tickets;
 
     @Autowired
@@ -103,6 +104,19 @@ abstract class TicketConflictTestSupport {
             competing.run();
             return realRepository.answer(invocation);
         }).when(messages).save(any());
+    }
+
+    /**
+     * Runs {@code competing} when the service flushes the ticket, then flushes for real. At that
+     * point the service has passed the version check (ADR-006) and changed the ticket in memory.
+     * The competitor's own commit flushes through the EntityManager, not through this method.
+     */
+    protected void beforeTicketFlush(Runnable competing) {
+        Answer<?> realRepository = Mockito.mockingDetails(tickets).getMockCreationSettings().getDefaultAnswer();
+        doAnswer(invocation -> {
+            competing.run();
+            return realRepository.answer(invocation);
+        }).when(tickets).flush();
     }
 
     /** Changes the test ticket in a transaction of its own that commits first. */

@@ -14,6 +14,8 @@ import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.web.context.request.ServletWebRequest;
 import org.springframework.web.context.request.WebRequest;
 
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
 
@@ -71,6 +73,25 @@ class ApiExceptionHandlerTest {
         assertThat(problem.getDetail()).isEqualTo("The ticket's current status does not allow this action.");
         assertThat(problem.getProperties()).isNull();
         assertThat(problem.toString()).doesNotContain(ex.getMessage()).doesNotContain("CLOSED").doesNotContain("ANSWERED");
+    }
+
+    @Test
+    void invalidFieldBecomesBadRequestWithFieldErrors() throws Exception {
+        InvalidFieldException ex = new InvalidFieldException("assigneeId", "must be an existing agent");
+
+        ResponseEntity<Object> response = handler.handleException(ex, request);
+
+        assertThat(response).isNotNull();
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        ProblemDetail problem = (ProblemDetail) response.getBody();
+        assertThat(problem).isNotNull();
+        assertThat(problem.getStatus()).isEqualTo(400);
+        assertThat(problem.getTitle()).isEqualTo("Bad Request");
+        assertThat(problem.getDetail()).isEqualTo("Validation failed.");
+        // The same body as bean validation; the exception carries no rejected value.
+        assertThat(problem.getProperties()).containsOnlyKeys("errors");
+        assertThat(problem.getProperties().get("errors")).isEqualTo(
+                List.of(new ApiExceptionHandler.FieldViolation("assigneeId", "must be an existing agent")));
     }
 
     @Test

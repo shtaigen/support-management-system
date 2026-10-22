@@ -5,6 +5,11 @@ spring:
     url: jdbc:postgresql://localhost:5432/${POSTGRES_DB:support}
     username: ${POSTGRES_USER:support}
     password: ${POSTGRES_PASSWORD:change-me}
+  jackson:
+    deserialization:
+      # A float in an integer field (for example "version": 0.9) is an unreadable body (400), not
+      # silently truncated.
+      accept-float-as-int: false
   jpa:
     open-in-view: false
     hibernate:
