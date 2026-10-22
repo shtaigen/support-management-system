@@ -43,6 +43,15 @@ class AgentTicketService {
     }
 
     /**
+     * The customers who have tickets, newest activity first (FR-08, NFR-05). The drill-down is
+     * {@link #list} with the customer filter.
+     */
+    @Transactional(readOnly = true)
+    List<AgentCustomerSummary> customerSummaries() {
+        return tickets.findCustomerSummaries();
+    }
+
+    /**
      * @throws TicketNotFoundException if the ticket does not exist
      */
     @Transactional(readOnly = true)

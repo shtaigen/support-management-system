@@ -42,4 +42,16 @@ public interface TicketRepository extends JpaRepository<Ticket, Long>, AgentTick
             + " order by t.lastMessageAt desc, t.id desc")
     List<CustomerTicketSummary> findSummariesOfCustomerInStatuses(@Param("customerId") Long customerId,
                                                                   @Param("statuses") Collection<TicketStatus> statuses);
+
+    /**
+     * Every customer with at least one ticket, newest activity first, then customer id descending
+     * (FR-08, NFR-05). The role is checked here because the database does not check it.
+     */
+    @Query("select new io.github.shtaigen.support.ticket.AgentCustomerSummary(c.id, c.name, c.email, count(t),"
+            + " sum(case when t.status <> io.github.shtaigen.support.ticket.TicketStatus.CLOSED then 1 else 0 end),"
+            + " max(t.lastMessageAt)) from Ticket t join t.customer c"
+            + " where c.role = io.github.shtaigen.support.user.UserRole.CUSTOMER"
+            + " group by c.id, c.name, c.email"
+            + " order by max(t.lastMessageAt) desc, c.id desc")
+    List<AgentCustomerSummary> findCustomerSummaries();
 }
