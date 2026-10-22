@@ -167,8 +167,8 @@ Common error responses, used by all FRs (details in NFR-03):
 |---|---|
 | Actor | Agent |
 | Description | The agent sees a summary of customers who have tickets and drills down to one customer's tickets. |
-| Inputs | None for the summary. The drill-down is FR-07 with the customer filter, so the FR-07 status and assignee filters are available there. |
-| Outcome | The summary lists every customer with at least one ticket. Each item shows the customer id, name and email, `ticketCount` (all tickets), `activeTicketCount` (tickets not in CLOSED) and `lastMessageAt` (the latest `last_message_at` of the customer's tickets). It is sorted by NFR-05. Selecting a customer shows that customer's tickets with the same per-ticket fields as FR-07. |
+| Inputs | `GET /api/agent/customers`, no parameters. The drill-down is FR-07 with the customer filter, so the FR-07 status and assignee filters are available there. |
+| Outcome | The summary lists every customer with at least one ticket. Each item shows the customer id, name and email, `ticketCount` (all tickets), `activeTicketCount` (tickets not in CLOSED) and `lastMessageAt` (the latest `last_message_at` of the customer's tickets). Each item is flat: `id`, `name`, `email`, `ticketCount`, `activeTicketCount`, `lastMessageAt`. The response is a JSON array. Only users with role CUSTOMER are listed; the role is checked in the query, because the database does not check it (section 5). It is sorted by NFR-05. Selecting a customer shows that customer's tickets with the same per-ticket fields as FR-07. |
 | Errors | 403 when the caller is not an agent. |
 | Source | PD (agreed in review, MVP; shape resolved in OQ-01). Not present in EI. |
 
@@ -209,7 +209,7 @@ Common error responses, used by all FRs (details in NFR-03):
 | Description | The agent sets the ticket's assignee to themselves or to another agent. |
 | Inputs | Ticket id. `PUT /api/agent/tickets/{id}/assignee` with a JSON body. `assigneeId`: required, an existing user with role AGENT. `version`: required, the ticket version from the agent's FR-09 view (ADR-006). |
 | Outcome | The assignee is replaced; status and messages are unchanged; `updated_at` is set. Assigning the current assignee again is a no-op: 200, and `version` and `updated_at` do not change (the version is still checked). A CLOSED ticket can be assigned. Unassigning is not supported (BR-10). The response is the updated ticket view, as in FR-09. |
-| Errors | 400 when `assigneeId` or `version` is missing (`errors[{field}]`). 400 with `errors[{field: "assigneeId"}]` when the user does not exist or is not an agent; both cases get the same message. Message: "must be an existing agent" (the same for a missing user, a customer and any other non-agent).404 when the ticket does not exist. 409 with the optimistic-locking detail when `version` differs from the ticket's current version, or when another change was committed at the same time (BR-15). 403 when the caller is not an agent. Checks run in this order: request body, assignee, ticket, version. |
+| Errors | 400 when `assigneeId` or `version` is missing (`errors[{field}]`). 400 with `errors[{field: "assigneeId"}]` when the user does not exist or is not an agent; both cases get the same message. Message: "must be an existing agent" (the same for a missing user, a customer and any other non-agent). 404 when the ticket does not exist. 409 with the optimistic-locking detail when `version` differs from the ticket's current version, or when another change was committed at the same time (BR-15). 403 when the caller is not an agent. Checks run in this order: request body, assignee, ticket, version. |
 | Source | PD (agreed in review, MVP; endpoint, no-op reassignment, CLOSED tickets and order of checks agreed before step 5d). Not present in EI. |
 
 ## 4. Business rules
