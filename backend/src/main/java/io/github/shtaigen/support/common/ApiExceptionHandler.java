@@ -1,5 +1,6 @@
 package io.github.shtaigen.support.common;
 
+import io.github.shtaigen.support.ticket.InvalidTicketTransitionException;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -69,6 +70,18 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
             ObjectOptimisticLockingFailureException ex, WebRequest request) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.CONFLICT, "The data was changed by another request. Reload it and try again.");
+        return handleExceptionInternal(ex, problem, new HttpHeaders(), HttpStatus.CONFLICT, request);
+    }
+
+    /**
+     * 409 when the ticket's status does not allow the operation (BR-06, BR-07, ADR-008). The detail
+     * is fixed and differs from the optimistic-locking one: the exception message names the
+     * statuses.
+     */
+    @ExceptionHandler(InvalidTicketTransitionException.class)
+    @Nullable ResponseEntity<Object> handleInvalidTransition(InvalidTicketTransitionException ex, WebRequest request) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.CONFLICT, "The ticket's current status does not allow this action.");
         return handleExceptionInternal(ex, problem, new HttpHeaders(), HttpStatus.CONFLICT, request);
     }
 

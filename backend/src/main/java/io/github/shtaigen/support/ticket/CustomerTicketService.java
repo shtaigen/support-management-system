@@ -8,9 +8,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collection;
-import java.util.EnumSet;
 import java.util.List;
-import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -68,10 +66,7 @@ class CustomerTicketService {
      */
     @Transactional(readOnly = true)
     List<CustomerTicketSummary> list(long customerId, @Nullable Collection<TicketStatus> statuses) {
-        Set<TicketStatus> filter = EnumSet.noneOf(TicketStatus.class);
-        if (statuses != null) {
-            statuses.stream().filter(Objects::nonNull).forEach(filter::add);
-        }
+        Set<TicketStatus> filter = TicketStatusFilter.of(statuses);
         return filter.isEmpty()
                 ? tickets.findSummariesOfCustomer(customerId)
                 : tickets.findSummariesOfCustomerInStatuses(customerId, filter);

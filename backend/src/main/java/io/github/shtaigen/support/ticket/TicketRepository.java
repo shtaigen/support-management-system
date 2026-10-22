@@ -8,7 +8,14 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
-public interface TicketRepository extends JpaRepository<Ticket, Long> {
+public interface TicketRepository extends JpaRepository<Ticket, Long>, AgentTicketQueries {
+
+    /**
+     * Any ticket, with its customer and assignee loaded (FR-09, FR-10). There is no ownership
+     * filter: agents see every ticket.
+     */
+    @Query("select t from Ticket t join fetch t.customer left join fetch t.assignee where t.id = :id")
+    Optional<Ticket> findWithPeopleById(@Param("id") Long id);
 
     /**
      * A customer's own ticket. Ownership is part of the query, so a ticket of another customer is

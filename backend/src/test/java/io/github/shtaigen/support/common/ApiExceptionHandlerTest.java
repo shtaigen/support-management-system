@@ -1,5 +1,7 @@
 package io.github.shtaigen.support.common;
 
+import io.github.shtaigen.support.ticket.InvalidTicketTransitionException;
+import io.github.shtaigen.support.ticket.TicketStatus;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -51,6 +53,24 @@ class ApiExceptionHandlerTest {
         assertThat(problem.getDetail()).isEqualTo("The data was changed by another request. Reload it and try again.");
         assertThat(problem.getProperties()).isNull();
         assertThat(problem.toString()).doesNotContain("SecretEntityMarker").doesNotContain("4711");
+    }
+
+    @Test
+    void invalidTransitionBecomesConflictWithFixedDetail() {
+        InvalidTicketTransitionException ex =
+                new InvalidTicketTransitionException(TicketStatus.CLOSED, TicketStatus.ANSWERED);
+
+        ResponseEntity<Object> response = handler.handleInvalidTransition(ex, request);
+
+        assertThat(response).isNotNull();
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        ProblemDetail problem = (ProblemDetail) response.getBody();
+        assertThat(problem).isNotNull();
+        assertThat(problem.getStatus()).isEqualTo(409);
+        assertThat(problem.getTitle()).isEqualTo("Conflict");
+        assertThat(problem.getDetail()).isEqualTo("The ticket's current status does not allow this action.");
+        assertThat(problem.getProperties()).isNull();
+        assertThat(problem.toString()).doesNotContain(ex.getMessage()).doesNotContain("CLOSED").doesNotContain("ANSWERED");
     }
 
     @Test
