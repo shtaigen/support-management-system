@@ -28,6 +28,7 @@ root). There is no Testcontainers or in-memory DB: `@SpringBootTest` connects to
 ## JPA
 `spring.jpa.open-in-view` is `false`: lazy associations must be loaded inside the
 service/transaction (fetch joins, entity graphs or DTO projections), not in controllers.
+In `AgentTicketService` the flush lives in the private `respond` method, which `postMessage`, `changeStatus` and `assign` all use. Build every write response through it.
 
 When a response shows `version` or `updatedAt` of an entity changed in the same request,
 call `flush()` on the repository before building the response. `@Version` and `@PreUpdate`

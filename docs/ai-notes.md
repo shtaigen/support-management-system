@@ -104,3 +104,15 @@ Lesson: Check an agent's summary against build totals and diffs, and prove a tes
 ## 2026-10-21: A mutation check showed why the reply flushes
 The agent reply (FR-10) returns version and updatedAt, so the service calls tickets.flush() before building the response. The conflict test does not need that line, because the optimistic-locking failure still surfaces at commit. Only a mutation check showed what the line protects: without it the POST response had an updatedAt a few milliseconds earlier than the following GET, because @PreUpdate ran again at the final flush.
 Lesson: For every line added to avoid a subtle pitfall, ask which test fails without it; if none does, the line will be deleted later as dead code.
+
+## 2026-10-22: Jackson truncates floats in integer fields
+A boundary test from plan review showed that "version": 0.9 was read as 0, so a malformed request could pass the optimistic locking check. The agent found it only because the review asked for a stop-and-ask test on floats; no existing test covered it. Fixed globally with accept-float-as-int: false and a before/after run to prove the key is applied.
+Lesson: Ask for boundary tests on input coercion, and prove a config key works by watching a test change from green to red.
+
+## 2026-10-22: Version +1 did not prove the flush
+A mutation that removed the explicit flush from the status-change path still passed every "version + 1" assertion; only the PUT-equals-GET comparison caught it, because updatedAt in the response differed from the database. A partial auto-flush before the thread query had already run @PreUpdate, and the final flush ran it again. The agent's first explanation of this was imprecise and had to be checked against the 5c flush rule.
+Lesson: Prove a flush by comparing the full response with a fresh read, not by one derived field.
+
+## 2026-10-22: Choosing the interception point for a race test
+For the 5d conflict tests the competing commit had to land after the client version check and before the UPDATE. A hook on the user lookup ran before the check and would have tested the explicit comparison instead of @Version; a hook on the thread query ran after the UPDATE and would have waited on our own row lock. The agent put the hook on TicketRepository.flush(), and a mutation without the flush proved it: the hook never ran and the request returned 200.
+Lesson: Place a race hook between the check and the write, and prove the placement with a mutation that removes the write.

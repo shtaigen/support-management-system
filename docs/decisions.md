@@ -40,12 +40,15 @@ Status: Accepted
 - Alternatives: `citext` extension; unique index on `lower(email)`.
 
 ## ADR-006: Optimistic locking on tickets
-Status: Accepted
+Status: Accepted (entity versioning), Planned (client version check, step 5d) Accepted
 
-- Context: two agents may change the status of the same ticket at the same time.
+- Context: two agents may change the status or the assignee of the same ticket at the same time, or an agent may act on a ticket view that is already stale.
 - Decision: `tickets.version` column mapped with `@Version`; a conflicting update fails and the API returns 409.
+- Client version (FR-11, FR-12): the request carries the version from the agent's FR-09 view. The service compares it with the loaded ticket's version before calling the domain method and, when they differ, throws `ObjectOptimisticLockingFailureException(Ticket.class, id)`, so the client gets the same 409 with the same detail (ADR-008). `@Version` alone compares with the version read in the same transaction, so it cannot detect a stale view.
+- Two layers: the explicit comparison catches a stale view; `@Version` at flush catches a change committed between the comparison and the flush.
+- Messages (FR-06, FR-10) carry no version: a reply is not a decision based on the ticket's state, so only the second layer applies.
 - Why: no silent lost updates and no database locks held while a user is thinking.
-- Alternatives: pessimistic locking (`SELECT ... FOR UPDATE`): safe but holds locks and scales worse; last write wins: simple but loses data.
+- Alternatives: pessimistic locking (`SELECT ... FOR UPDATE`): safe but holds locks and scales worse; last write wins: simple but loses data; the version in an `If-Match` header with an `ETag` response header: standard HTTP conditional requests, but more work in the client and in the error mapping; merging a detached entity that carries the client version: copies every field from the request and hides what changed.
 
 ## ADR-007: open-in-view disabled
 Status: Accepted
@@ -64,13 +67,17 @@ Status: Accepted (structure, DTOs, errors), Planned (API docs)
   - An API error with a fixed status (404, 409, 401 on login) extends `ErrorResponseException` and needs no new handler. Exceptions are never annotated with `@ResponseStatus`: the catch-all below runs before `ResponseStatusExceptionResolver` and would turn them into 500.
   - 400 for bean validation and for a path variable or parameter that cannot be converted (for example a non-numeric id): `errors[{field, message}]`.
   - 400 for malformed JSON and for an unknown enum value: the generic "Failed to read request" without `errors[]`, because Jackson's messages contain the rejected value. Field-level errors for these would be a change for all endpoints at once.
+  - 400 for a field that fails a service-side check (FR-12 assignee): `common/InvalidFieldException` extends `ErrorResponseException` and builds its body with `ApiExceptionHandler.validationProblem`, so the body is the same `errors[]` shape as bean validation. It never carries the rejected value. No separate handler.
   - 409 for an optimistic-locking conflict (BR-15): `ObjectOptimisticLockingFailureException` reaches the advice and is handled in `ApiExceptionHandler` with the fixed detail "The data was changed by another request. Reload it and try again.". It comes from the transaction manager at commit, from a repository call at an auto-flush, or from an explicit repository `flush()`; the agent reply (FR-10) flushes before building its response, so its conflict surfaces there. It is a framework exception, so it has its own handler.
+    Sources: `@Version` at the explicit `tickets.flush()` before building the response (FR-10, FR-11, FR-12), `@Version` at commit, and the explicit comparison of the client's version with the loaded entity (FR-11, FR-12; ADR-006). All three give the same 409 body.
   - 409 for an invalid status transition (section 2 of the requirements, BR-06, BR-07): `InvalidTicketTransitionException` is thrown by the `Ticket` aggregate and handled in `ApiExceptionHandler` with the fixed detail "The ticket's current status does not allow this action.". It is a domain exception, and the domain does not depend on Spring Web, so it has its own handler instead of extending `ErrorResponseException`.
   - The two 409 causes have different fixed details. Neither response carries an entity name, id, version or status value, and the exception message is never used.
+  
   - 500 for any exception without a more specific handler: a fixed detail, the exception logged with its stack trace and never returned. Without it the error would go through an ERROR dispatch to `/error`, pass the security chain again and could come back as 401, 403 or an empty body. Spring Security exceptions are rethrown, so 401 and 403 stay with Spring Security.
   - A valid token whose user is missing or has another role is an `IllegalStateException` and a 500, not a 4xx: the MVP never deletes users or changes roles, so it signals a bug, not a client error.
 - API docs: springdoc-openapi (NFR-07, not yet added).
 - Alternatives: package by layer (global `controllers/`, `services/`); a separate `message/` feature with its own service, which would create a second write path for messages; MapStruct. These add indirection or weaken the single write path.
+- Integer fields in JSON bodies do not accept floating-point values (spring.jackson.deserialization.accept-float-as-int: false). A value like 0.9 is an unreadable body and gets the generic 400, the same as a non-numeric value. Reason: truncation would turn an invalid version into a valid one and pass the optimistic locking check.
 
 ## ADR-009: Authentication and authorization
 Status: Accepted

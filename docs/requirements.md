@@ -197,22 +197,20 @@ Common error responses, used by all FRs (details in NFR-03):
 |---|---|
 | Actor | Agent |
 | Description | The agent closes or reopens a ticket. |
-| Inputs | Ticket id. Target status: `CLOSED` or `OPEN`. The ticket version, for optimistic locking. |
-| Outcome | TR-07 (close) or TR-08 (reopen). The assignee is unchanged and `updated_at` is set. |
-| Errors | 400 on an unknown status value. 404 when the ticket does not exist. 409 on any transition not in TR-07/TR-08, including a change to the same status, or on a version conflict. |
-| Source | EI (close only). PD (reopen and the transition rules, agreed in review). |
+| Inputs | Ticket id. `PUT /api/agent/tickets/{id}/status` with a JSON body. `status`: required, `CLOSED` or `OPEN`. `version`: required, the ticket version from the agent's FR-09 view (ADR-006). |
+| Outcome | TR-07 (close) or TR-08 (reopen). The assignee is unchanged and `updated_at` is set. The response is the updated ticket view, as in FR-09, with the new version. |
+| Errors | 400 when `status` or `version` is missing (`errors[{field}]`). 400 when the status value is unknown or not uppercase: the generic response for an unreadable body, without `errors[]` (ADR-008). 404 when the ticket does not exist. 409 with the optimistic-locking detail when `version` differs from the ticket's current version, or when another change was committed at the same time (BR-15). 409 with the transition detail on any transition not in TR-07/TR-08, including a change to the same status (BR-07). 403 when the caller is not an agent. Checks run in this order: request body, ticket, version, transition. |
+| Source | EI (close only). PD (reopen and the transition rules, agreed in review; endpoint, version check and order of checks agreed before step 5d). |
 
 ### FR-12 Assign or reassign a ticket
 | Field | Value |
 |---|---|
 | Actor | Agent |
 | Description | The agent sets the ticket's assignee to themselves or to another agent. |
-| Inputs | Ticket id. Assignee user id, which must be an existing user with role AGENT. The ticket version. |
-| Outcome | The assignee is replaced; status and messages are unchanged; `updated_at` is set. Unassigning (setting no assignee) is not supported (BR-10). |
-| Errors | 400 when the assignee is missing, not found, or not an agent. 404 when the ticket does not exist. 409 on a version conflict. |
-| Source | PD (agreed in review, MVP). Not present in EI. |
-
----
+| Inputs | Ticket id. `PUT /api/agent/tickets/{id}/assignee` with a JSON body. `assigneeId`: required, an existing user with role AGENT. `version`: required, the ticket version from the agent's FR-09 view (ADR-006). |
+| Outcome | The assignee is replaced; status and messages are unchanged; `updated_at` is set. Assigning the current assignee again is a no-op: 200, and `version` and `updated_at` do not change (the version is still checked). A CLOSED ticket can be assigned. Unassigning is not supported (BR-10). The response is the updated ticket view, as in FR-09. |
+| Errors | 400 when `assigneeId` or `version` is missing (`errors[{field}]`). 400 with `errors[{field: "assigneeId"}]` when the user does not exist or is not an agent; both cases get the same message. Message: "must be an existing agent" (the same for a missing user, a customer and any other non-agent).404 when the ticket does not exist. 409 with the optimistic-locking detail when `version` differs from the ticket's current version, or when another change was committed at the same time (BR-15). 403 when the caller is not an agent. Checks run in this order: request body, assignee, ticket, version. |
+| Source | PD (agreed in review, MVP; endpoint, no-op reassignment, CLOSED tickets and order of checks agreed before step 5d). Not present in EI. |
 
 ## 4. Business rules
 
@@ -227,7 +225,7 @@ Common error responses, used by all FRs (details in NFR-03):
 | BR-07 | Manual status changes are limited to TR-07 and TR-08. Every other manual transition, including a change to the same status, returns 409. | PD (agreed in review) |
 | BR-08 | Customers cannot change a ticket's status, including closing it. | EI, PD |
 | BR-09 | The first agent reply on an unassigned ticket assigns the replying agent. A reply never overwrites an existing assignee. | EI, PD |
-| BR-10 | Agents can assign and reassign a ticket to any user with role AGENT. Unassigning is not supported in the MVP. The assignee is kept when a ticket is closed or reopened. | PD (agreed in review) |
+| BR-10 | Agents can assign and reassign a ticket to any user with role AGENT, in any status, including CLOSED. Assigning the current assignee again changes nothing. Unassigning is not supported in the MVP. The assignee is kept when a ticket is closed or reopened. | PD (agreed in review; reassignment rules agreed before step 5d) |
 | BR-11 | A message body is required, not blank, and at most 4000 characters counted as sent (surrounding whitespace included; the body is stored unchanged). It must not contain NUL (U+0000) characters, which PostgreSQL text columns cannot store. It is validated on the server. | PD (V1 `messages_body_not_blank_ck`, agreed in review) |
 | BR-12 | Every message records its author (`author_id`). Whether the author is a customer or an agent follows from the author's role. | PD (V1) |
 | BR-13 | Timestamps are stored as `timestamptz`. `created_at` is set on insert. `last_message_at` is set when the ticket is created and on every message. `updated_at` is set on every change to the ticket (status, assignee, new message). | PD (V1) |
