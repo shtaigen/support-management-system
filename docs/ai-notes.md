@@ -116,3 +116,11 @@ Lesson: Prove a flush by comparing the full response with a fresh read, not by o
 ## 2026-10-22: Choosing the interception point for a race test
 For the 5d conflict tests the competing commit had to land after the client version check and before the UPDATE. A hook on the user lookup ran before the check and would have tested the explicit comparison instead of @Version; a hook on the thread query ran after the UPDATE and would have waited on our own row lock. The agent put the hook on TicketRepository.flush(), and a mutation without the flush proved it: the hook never ran and the request returned 200.
 Lesson: Place a race hook between the check and the write, and prove the placement with a mutation that removes the write.
+
+## 2026-10-22: A tie-break test passed by chance
+In step 5e, removing the customer id tie-breaker from the summary query did not fail any test. With only three tied rows, Postgres returned the HashAggregate output in an order that happened to be id descending (a 1 in 6 chance). The agent suggested creating customers out of id order, which identity columns make impossible; the fix was a larger tied group (six rows, about 1 in 720) and repeated mutation runs.
+Lesson: A test for an order the database does not guarantee needs enough tied rows that a chance pass is unlikely, and its mutation should be run more than once.
+
+## 2026-10-22: A tie-break test passed by chance
+In step 5e, removing the customer id tie-breaker from the summary query did not fail any test. With three tied rows, Postgres returned the HashAggregate output in an order that happened to be id descending; with six tied rows it came back id ascending in every run. The order of tied rows is not random, only not guaranteed, so a small group can match the expected order by accident. The agent suggested creating customers out of id order, which identity columns make impossible; the fix was a larger tied group and three mutation runs.
+Lesson: For an order the database does not guarantee, use enough tied rows to break an accidental match, and run the mutation more than once.

@@ -88,3 +88,5 @@ Never log passwords, hashes or tokens (NFR-02). Request/response records that ho
 
 - Never annotate exceptions with @ResponseStatus: the catch-all @ExceptionHandler(Exception.class) in ApiExceptionHandler runs first and would turn them into 500. 
 An API error with a fixed status extends ErrorResponseException (see auth/InvalidCredentialsException, ticket/TicketNotFoundException).
+
+- Tie-break tests (an order such as `lastMessageAt desc, id desc`) use at least six rows with the same leading value. With fewer rows, Postgres can return tied rows in the expected order by accident, and the tie-break mutation survives (step 5e).
