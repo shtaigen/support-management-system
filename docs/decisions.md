@@ -72,6 +72,13 @@ Status: Accepted (structure, DTOs, errors), Planned (API docs)
     Sources: `@Version` at the explicit `tickets.flush()` before building the response (FR-10, FR-11, FR-12), `@Version` at commit, and the explicit comparison of the client's version with the loaded entity (FR-11, FR-12; ADR-006). All three give the same 409 body.
   - 409 for an invalid status transition (section 2 of the requirements, BR-06, BR-07): `InvalidTicketTransitionException` is thrown by the `Ticket` aggregate and handled in `ApiExceptionHandler` with the fixed detail "The ticket's current status does not allow this action.". It is a domain exception, and the domain does not depend on Spring Web, so it has its own handler instead of extending `ErrorResponseException`.
   - The two 409 causes have different fixed details. Neither response carries an entity name, id, version or status value, and the exception message is never used.
+  OpenAPI (NFR-07), decided before step 6a:
+- springdoc-openapi-starter-webmvc-ui 3.2.0 (the 3.x line targets Spring Boot 4; 3.2.0 is built against Spring Boot 4.1).
+- The spec (/v3/api-docs, /v3/api-docs.yaml) and Swagger UI (/swagger-ui.html, /swagger-ui/**) are public (permitAll) in every profile. All other paths keep the existing rules, including denyAll for unknown paths.
+- The spec declares one security scheme: HTTP bearer, JWT. It applies to every /api/** operation except login.
+- springdoc.override-with-generic-response is false. Error responses are declared per operation with @ApiResponse, exactly as listed in the FR Errors rows, with the ProblemDetail schema. No @ResponseStatus is added to exceptions (backend/CLAUDE.md rule stands).
+- The authenticated user id (@CurrentUserId) never appears as a parameter in the spec.
+- springdoc.writer-with-order-by-keys is true, so the spec is deterministic.
   
   - 500 for any exception without a more specific handler: a fixed detail, the exception logged with its stack trace and never returned. Without it the error would go through an ERROR dispatch to `/error`, pass the security chain again and could come back as 401, 403 or an empty body. Spring Security exceptions are rethrown, so 401 and 403 stay with Spring Security.
   - A valid token whose user is missing or has another role is an `IllegalStateException` and a 500, not a 4xx: the MVP never deletes users or changes roles, so it signals a bug, not a client error.
