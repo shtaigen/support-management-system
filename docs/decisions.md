@@ -135,3 +135,96 @@ Status: Accepted
 an `ApplicationRunner` under `@Profile("demo")`. It inserts an account only if its email is missing, so restarts are idempotent. 
 All accounts share one password from `app.seed.demo-password` (`application-demo.yaml`, overridable via `APP_SEED_DEMOPASSWORD`); 
 there is no default in code and startup fails if it is missing or blank. Passwords are hashed with the shared BCrypt `PasswordEncoder` bean, the same one login uses.
+
+## ADR-014: Frontend authentication
+
+**Status:** Accepted
+**Date:** 2026-10-25
+
+### Context
+The backend issues a stateless JWT on `POST /api/auth/login` (FR-01) and has no refresh token (NFR-01). The response shape, verified against a live response through the dev proxy, is:
+
+    {
+      "accessToken": "<JWT>",
+      "expiresAt": "2026-10-25T14:52:29Z",
+      "user": { "id": 1, "name": "Alice Agent", "role": "AGENT" }
+    }
+
+The token lives one hour. Logout (FR-02) is client-only. The zones `/client` and `/staff` are lazy routes guarded by `canMatch` (ADR-011). The frontend reaches the API only through the same origin (ADR-009). Errors follow RFC 9457 (ADR-008). A failed login returns 401 with `detail` "Invalid email or password." for both unknown email and wrong password.
+
+### Decision
+
+#### 1. Storage
+- The whole login response is stored as JSON in `sessionStorage` under one key, `sms.session`.
+- Not memory only: a reload would log the user out, which is poor UX with polling (NFR-06).
+- Not `localStorage`: it is shared across tabs and survives a browser restart. With `sessionStorage` each tab is an independent session, and the session ends when the tab closes.
+- No browser storage protects the token from XSS (a script running in the page can also send requests). XSS is prevented instead: Angular template escaping, no `innerHTML` with user data.
+
+#### 2. Expiry
+- The client never decodes the JWT; the token is an opaque string. Expiry comes from `expiresAt`.
+- A session is valid when it exists and `Date.now() < Date.parse(expiresAt)`. This is the method `hasValidSession()`, not a `computed`: signals do not track time, so a `computed` would keep an expired session valid.
+- An expired session is removed on startup, and guards reject it.
+- No logout timer and no clock-skew margin. The server is the source of truth: any 401 ends the session.
+
+#### 3. 401 and 403
+- 401 from `POST /api/auth/login`: shown in the login form (`detail`); no logout.
+- Any other 401: `logout({ expired: true })`, which navigates to `/login?expired=1`; the login page shows "Your session has expired. Please sign in again."
+- `logout()` is idempotent: without a session it does nothing and does not navigate, so parallel 401s (polling plus a user action) cause one navigation.
+- 403 does not log out: the session is valid, the screen handles it.
+- No return URL: after login the user always lands on the home page of their zone. A return URL would need open-redirect and cross-zone checks.
+
+#### 4. Interceptors
+- Functional interceptors: `provideHttpClient(withInterceptors([authInterceptor, unauthorizedInterceptor]))`.
+- `authInterceptor` adds `Authorization: Bearer <accessToken>` only when `req.url` starts with `/api/` and is not exactly `/api/auth/login`. Absolute URLs never receive the token. The token is read at request time, not captured. Without a session the request is sent without the header. No client-side expiry check before sending.
+- `unauthorizedInterceptor`: on a 401 from any URL other than `/api/auth/login` it calls `logout({ expired: true })` and rethrows the error. Screens do not show their own message for 401.
+- Dependencies are taken with `inject()` inside the interceptor function; no manual `Injector` workaround for the `AuthService` → `HttpClient` dependency.
+
+#### 5. Guards and routes
+- Zone guard (`canMatch` on `/client` and `/staff`): no valid session → `/login`; role does not match the zone → the user's own zone. Guards return a `UrlTree`, never call `router.navigate()`.
+- Guest guard on `/login`: a valid session → the user's own zone.
+- `''` and `**`: functional `redirectTo` → own zone with a valid session, otherwise `/login`.
+- Guards are UX and bundle economy (`canMatch` does not download a foreign zone's code), not security. The server enforces access (ADR-009).
+
+#### 6. Server errors
+- `core/http/` holds a `ProblemDetail` type (`status`, `title`, `detail?`, `errors?: { field, message }[]`) and `toProblem(error: HttpErrorResponse)`.
+- A body is accepted as ProblemDetail only if it is an object with a numeric `status`. Otherwise: status 0 → "Cannot reach the server. Please try again."; anything else → "Something went wrong. Please try again."
+- The login form shows only `detail`. Mapping `errors[]` to form controls is deferred to the customer zone (FR-03).
+
+#### 7. Login screen
+- Typed Reactive Forms (`nonNullable`). Signal Forms are stable since Angular 22, but Reactive Forms remain the standard in existing codebases; revisit later.
+- Validators: both fields required, email format. Any other rule (length limits) is taken from `docs/requirements.md` and the OpenAPI spec, never invented.
+- A `submitting` signal disables the button and shows a spinner; the submit handler also ignores submits while a request is pending (Enter submits even with a disabled button).
+- On success: navigate to the user's zone with `replaceUrl: true`, so Back does not return to the form.
+- The `?expired=1` message is shown until the first submit; the error from `toProblem()` is shown until the next submit. The error block has `role="alert"`.
+- `type="email"` with `autocomplete="username"`, `type="password"` with `autocomplete="current-password"`.
+- Material: `mat-card`, `mat-form-field` with `matInput`, `mat-flat-button`, `mat-progress-spinner`.
+
+#### 8. AuthService
+- `providedIn: 'root'`. A private `signal<Session | null>` exposed via `asReadonly()`; `computed` for `user`.
+- The session is restored synchronously in the constructor; no app initializer.
+- Defensive parsing: corrupt JSON, missing fields, unparsable `expiresAt` or an unknown role → remove the key, session `null`.
+- Storage is injected through a `SESSION_STORAGE` token (factory `() => sessionStorage`); the key `sms.session` is a single constant.
+- `login(email, password): Observable<Session>` stores the session on success; the component navigates.
+- `logout(options?: { expired?: boolean })` is the single path for FR-02 and for 401.
+- No cross-tab synchronization (no `storage` event): sessions are per tab by design.
+
+### Tests
+Vitest with `provideHttpClientTesting` and `HttpTestingController`; guards, redirects and interceptors through `TestBed.runInInjectionContext`; time through `vi.setSystemTime`. Required cases:
+- AuthService: restore a valid session; restore an expired one (key removed); corrupt JSON; unknown role; login stores the session; logout clears and navigates; a second logout does not navigate; `logout({ expired: true })` → `/login?expired=1`; a session that expires after login is no longer valid (fails if implemented with `computed`).
+- authInterceptor: header on `/api/...`; no header on the login URL; no header on an absolute URL; no header without a session; token read at request time (login twice, the second token is sent).
+- unauthorizedInterceptor: 401 → logout and rethrow; 401 from login → no logout; 403 → no logout.
+- Guards: no session; expired session; each role on its own zone; each role on the other zone → own zone; guest guard with and without a session.
+- `toProblem`: real ProblemDetail; status 0; string (HTML) body; null body.
+- Login component: 401 shows `detail`; double submit sends one request; success navigates with `replaceUrl`; `?expired=1` shows the message.
+
+### Consequences
+- A reload keeps the session; a customer and an agent can be logged in side by side in two tabs.
+- A stolen token is usable for up to one hour; this is mitigated only by preventing XSS.
+- With a skewed client clock the client may consider a session valid a little longer; the 401 path covers it.
+- After re-login the user starts from the zone home page, not from the page they were on.
+
+### Alternatives considered
+- Token in memory only; `localStorage`; httpOnly cookie (needs backend changes and CSRF protection, conflicts with the Bearer design).
+- Decoding `exp` from the JWT on the client; a logout timer.
+- One combined interceptor; class-based interceptors.
+- Signal Forms.

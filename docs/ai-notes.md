@@ -136,3 +136,7 @@ Lesson: When a framework fills in defaults, check what disappears as soon as you
 ## 2026-10-25: A mutation that changes nothing is a finding
 Setting springdoc.override-with-generic-response back to true produced a byte-identical spec, because our exception handlers have no @ResponseStatus, so there is nothing for springdoc to copy. The setting stays as a guard for the future, and the ADR says it has no visible effect today.
 Lesson: When a mutation changes nothing, record that the setting is currently inert instead of inventing a test that passes either way.
+
+## 2026-10-25: Login response shape differs from the handoff notes
+While verifying the dev proxy with curl, the real FR-01 response turned out to be {accessToken, expiresAt, user: {id, name, role}}, not the flat {token, id, name, role} remembered in the handoff. The server already returns the expiry instant, so the frontend does not need to decode the JWT at all.
+Lesson: take API shapes from a live response or the OpenAPI spec, never from notes or memory.

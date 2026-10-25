@@ -22,8 +22,18 @@ There is no global Angular CLI: use npm scripts or `npx ng ...`, never bare `ng`
 - Roles are exactly `CUSTOMER` and `AGENT`, matching `users_role_ck` in the backend V1 migration.
   Do not invent other role names (no `ADMIN`, `STAFF`, `CLIENT`).
 - Role-to-zone mapping (`/client`, `/staff`) lives only in `src/app/core/auth/user-role.ts`.
-- `AuthService` is a temporary stub: the role is kept in memory and lost on reload. Do not
-  build features that rely on it persisting; real auth will replace it.
+- Authentication follows ADR-014 in `docs/decisions.md`. Read it before changing anything in
+  `core/auth/` or `core/http/`. If ADR-014 does not decide something, stop and ask.
+- Invariants (details in ADR-014):
+  - The session (`accessToken`, `expiresAt`, `user`) is stored in `sessionStorage` under the key
+    `sms.session` and accessed only through `AuthService` and the `SESSION_STORAGE` token.
+  - Never decode the JWT; expiry comes from `expiresAt`. Session validity is the method
+    `hasValidSession()`, never a `computed`: signals do not track time.
+  - The `Authorization` header is added only to relative `/api/` URLs, never to
+    `/api/auth/login`.
+  - Any 401 except from the login request ends the session through `logout({ expired: true })`;
+    403 never logs out.
+  - Guards return a `UrlTree`. They are UX only; the backend enforces access.
 
 ## Styling
 The Angular Material M3 theme (azure primary, blue tertiary) is defined in `src/styles.scss`.
