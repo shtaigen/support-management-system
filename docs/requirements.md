@@ -84,7 +84,8 @@ close a ticket.
 ## 3. Functional requirements
 
 Common error responses, used by all FRs (details in NFR-03):
-- **400**: validation failure.
+- **400**: validation failure, including a path or query value that cannot be converted, for
+  example a non-numeric id (ADR-008).
 - **401**: no token, or the token is invalid or expired.
 - **403**: the role is not allowed to perform the operation.
 - **404**: the ticket does not exist, or it belongs to another customer (BR-01).
@@ -139,8 +140,8 @@ Common error responses, used by all FRs (details in NFR-03):
 | Description | The customer opens one of their tickets and reads the thread. |
 | Inputs | Ticket id. |
 | Outcome | Ticket details without the assignee, and all messages in chronological order (NFR-05). Each message shows its body, its time, and whether the author is the customer or an agent. |
-| Errors | 404 when the ticket is missing or not owned by the caller (BR-01). 403 when the caller is not a customer. |
-| Source | EI, PD (ADR-009, agreed in review) |
+| Errors | 400 when the id is not a valid number (ADR-008). 404 when the ticket is missing or not owned by the caller (BR-01). 403 when the caller is not a customer. |
+| Source | EI, PD (ADR-009, agreed in review; 400 for a malformed id added in step 6a) |
 
 ### FR-06 Post a message as a customer
 | Field | Value |
@@ -149,8 +150,8 @@ Common error responses, used by all FRs (details in NFR-03):
 | Description | The customer adds a message to one of their tickets. |
 | Inputs | Ticket id. `body` (BR-11). |
 | Outcome | A message authored by the caller. The status changes according to TR-03..TR-06; on a CLOSED ticket this reopens it to CUSTOMER_REPLIED. `last_message_at` and `updated_at` are set. The response is the updated ticket view, as in FR-05, so the client sees the new status. |
-| Errors | 400 on an invalid body. 404 when the ticket is missing or not owned. 409 when another change to the ticket was committed at the same time (BR-15); the request carries no version. |
-| Source | EI (customer message reopens a closed ticket). PD (target statuses, agreed in review). |
+| Errors | 400 on an invalid body. 404 when the ticket is missing or not owned. 409 when another change to the ticket was committed at the same time (BR-15); the request carries no version. 403 when the caller is not a customer. |
+| Source | EI (customer message reopens a closed ticket). PD (target statuses, agreed in review; 403 added in step 6a). |
 
 ### FR-07 List all tickets as an agent
 | Field | Value |
@@ -179,8 +180,8 @@ Common error responses, used by all FRs (details in NFR-03):
 | Description | The agent opens any ticket. |
 | Inputs | Ticket id. |
 | Outcome | Ticket details: id, subject, category, reference number, status, the customer (id, name and email), the assignee (id and name, or none), `created_at`, `updated_at`, `last_message_at` and `version`. The version is what FR-11 and FR-12 send back for optimistic locking. The full thread in chronological order (NFR-05); each message shows its body, its time, and its author's name and role. |
-| Errors | 404 when the ticket does not exist. 403 when the caller is not an agent. |
-| Source | EI, PD (version in the view agreed before step 5c) |
+| Errors | 400 when the id is not a valid number (ADR-008). 404 when the ticket does not exist. 403 when the caller is not an agent. |
+| Source | EI, PD (version in the view agreed before step 5c; 400 for a malformed id added in step 6a) |
 
 ### FR-10 Reply as an agent
 | Field | Value |
@@ -189,8 +190,8 @@ Common error responses, used by all FRs (details in NFR-03):
 | Description | The agent adds a message to a ticket. |
 | Inputs | Ticket id. `body` (BR-11). |
 | Outcome | A message authored by the caller. The status becomes ANSWERED (TR-02). If the ticket was unassigned, the caller becomes the assignee (BR-09). A reply to a ticket assigned to another agent is allowed and keeps that assignee. `last_message_at` and `updated_at` are set. The response is the updated ticket view, as in FR-09. |
-| Errors | 400 on an invalid body. 404 when the ticket does not exist. 409 when the ticket is CLOSED (BR-06), or when another change to the ticket was committed at the same time (BR-15); the request carries no version. |
-| Source | EI (first reply moves the ticket forward and auto-assigns). PD (agreed in review; no version and the response shape agreed before step 5c). |
+| Errors | 400 on an invalid body. 404 when the ticket does not exist. 409 when the ticket is CLOSED (BR-06), or when another change to the ticket was committed at the same time (BR-15); the request carries no version. 403 when the caller is not an agent. |
+| Source | EI (first reply moves the ticket forward and auto-assigns). PD (agreed in review; no version and the response shape agreed before step 5c; 403 added in step 6a). |
 
 ### FR-11 Change status manually
 | Field | Value |
@@ -376,7 +377,7 @@ While a thread is open, it refreshes by polling (NFR-06).
 | NFR-04 | All input validation is done on the server. Client-side checks only improve usability and are never relied on. | PD (agreed in review) |
 | NFR-05 | Ticket lists are sorted by `last_message_at` descending, then `id` descending. Threads are sorted by `created_at` ascending, then `id` ascending. The customer summary (FR-08) is sorted by `lastMessageAt` descending, then customer `id` descending. | PD (V1 indexes, agreed in review) |
 | NFR-06 | Chat updates use REST polling every 3–5 seconds, only while a thread is open. | PD (ADR-010) |
-| NFR-07 | The API is documented with OpenAPI. | PD (ADR-008) |
+| NFR-07 | The API is documented with OpenAPI 3.1, generated by springdoc. The spec (`/v3/api-docs`) and Swagger UI (`/swagger-ui.html`) are public. Each operation lists every 4xx response it can return, with the Problem Details schema. | PD (ADR-008) |
 | NFR-08 | Messages are written through a single write path (BR-17). No second channel bypasses validation or the status rules. | PD (agreed in review) |
 
 ---

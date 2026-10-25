@@ -40,7 +40,7 @@ Status: Accepted
 - Alternatives: `citext` extension; unique index on `lower(email)`.
 
 ## ADR-006: Optimistic locking on tickets
-Status: Accepted (entity versioning), Planned (client version check, step 5d) Accepted
+Status: Accepted
 
 - Context: two agents may change the status or the assignee of the same ticket at the same time, or an agent may act on a ticket view that is already stale.
 - Decision: `tickets.version` column mapped with `@Version`; a conflicting update fails and the API returns 409.
@@ -57,7 +57,7 @@ Status: Accepted
 - Why: no lazy loading during JSON serialization and no hidden queries outside transactions; services must fetch what the response needs (fetch joins, entity graphs, projections).
 
 ## ADR-008: Backend structure
-Status: Accepted (structure, DTOs, errors), Planned (API docs)
+Status: Accepted
 
 - Package by feature: `user/`, `ticket/`, `auth/`, plus `common/` for cross-cutting code (exception handling, clock). There is no `message/` package: `Message` belongs to the `Ticket` aggregate and is never changed on its own.
 - `Ticket` is the aggregate root. Every message, from either role, is added through `Ticket.postMessage(...)`, which applies the status rules, auto-assignment, body validation and authorship in one place (BR-17, NFR-08). Manual status changes and assignment are also `Ticket` methods. The domain rules are plain unit tests.
@@ -72,19 +72,23 @@ Status: Accepted (structure, DTOs, errors), Planned (API docs)
     Sources: `@Version` at the explicit `tickets.flush()` before building the response (FR-10, FR-11, FR-12), `@Version` at commit, and the explicit comparison of the client's version with the loaded entity (FR-11, FR-12; ADR-006). All three give the same 409 body.
   - 409 for an invalid status transition (section 2 of the requirements, BR-06, BR-07): `InvalidTicketTransitionException` is thrown by the `Ticket` aggregate and handled in `ApiExceptionHandler` with the fixed detail "The ticket's current status does not allow this action.". It is a domain exception, and the domain does not depend on Spring Web, so it has its own handler instead of extending `ErrorResponseException`.
   - The two 409 causes have different fixed details. Neither response carries an entity name, id, version or status value, and the exception message is never used.
-  OpenAPI (NFR-07), decided before step 6a:
-- springdoc-openapi-starter-webmvc-ui 3.2.0 (the 3.x line targets Spring Boot 4; 3.2.0 is built against Spring Boot 4.1).
-- The spec (/v3/api-docs, /v3/api-docs.yaml) and Swagger UI (/swagger-ui.html, /swagger-ui/**) are public (permitAll) in every profile. All other paths keep the existing rules, including denyAll for unknown paths.
-- The spec declares one security scheme: HTTP bearer, JWT. It applies to every /api/** operation except login.
-- springdoc.override-with-generic-response is false. Error responses are declared per operation with @ApiResponse, exactly as listed in the FR Errors rows, with the ProblemDetail schema. No @ResponseStatus is added to exceptions (backend/CLAUDE.md rule stands).
-- The authenticated user id (@CurrentUserId) never appears as a parameter in the spec.
-- springdoc.writer-with-order-by-keys is true, so the spec is deterministic.
-  
   - 500 for any exception without a more specific handler: a fixed detail, the exception logged with its stack trace and never returned. Without it the error would go through an ERROR dispatch to `/error`, pass the security chain again and could come back as 401, 403 or an empty body. Spring Security exceptions are rethrown, so 401 and 403 stay with Spring Security.
   - A valid token whose user is missing or has another role is an `IllegalStateException` and a 500, not a 4xx: the MVP never deletes users or changes roles, so it signals a bug, not a client error.
-- API docs: springdoc-openapi (NFR-07, not yet added).
-- Alternatives: package by layer (global `controllers/`, `services/`); a separate `message/` feature with its own service, which would create a second write path for messages; MapStruct. These add indirection or weaken the single write path.
 - Integer fields in JSON bodies do not accept floating-point values (spring.jackson.deserialization.accept-float-as-int: false). A value like 0.9 is an unreadable body and gets the generic 400, the same as a non-numeric value. Reason: truncation would turn an invalid version into a valid one and pass the optimistic locking check.
+- OpenAPI (NFR-07, step 6a):
+  - `springdoc-openapi-starter-webmvc-ui` 3.2.0 (the 3.x line targets Spring Boot 4; 3.2.0 is built against Spring Boot 4.1). Through swagger-core it brings Jackson 2 (`com.fasterxml.jackson`), used only to write the spec; the API itself still serializes with Jackson 3.
+  - Public in every profile, GET only: `/v3/api-docs`, `/v3/api-docs/**`, `/v3/api-docs.yaml`, `/swagger-ui.html`, `/swagger-ui/**`. Other methods on these paths and all other paths keep the existing rules, including denyAll for unknown paths. springdoc logs a startup warning that the docs are enabled in production; this is expected.
+  - `common/OpenApiConfig` is the one place for the API info, the security scheme (HTTP bearer, JWT) and the global security requirement. Login opts out with an empty `@SecurityRequirements`, so its operation has `security: []`.
+  - Each operation declares, with `@ApiResponse` and the `ProblemDetail` schema (`application/problem+json`), every 4xx it can actually return: the codes in its FR Errors row, 401 on every authenticated operation, 403 for the wrong role, and 400 wherever a path or query value can fail conversion. 500 is never declared: the catch-all is not part of the API contract.
+  - Once an operation declares any `@ApiResponse`, springdoc stops generating its success response, so each operation also declares a bare success `@ApiResponse` (200, or 201 for FR-03). Its schema is still generated from the return type.
+  - `springdoc.default-produces-media-type: application/json`: success responses are `application/json` without `produces` on the controllers.
+  - `springdoc.override-with-generic-response: false`. With today's handlers (no `@ResponseStatus`) it has no visible effect (in step 6a the mutation produced an identical spec); it guards against advice responses being copied into every operation later.
+  - `springdoc.writer-with-order-by-keys: true`, so the spec is deterministic.
+  - The authenticated user id (`@CurrentUserId`) does not appear as a parameter: springdoc ignores `@AuthenticationPrincipal` parameters, also through the meta-annotation (checked in step 6a, covered by a test).
+  - Each controller has `@Tag`; each operation has `@Operation(summary = "FR-xx: ...")`. Operation ids are generated (for example `list_2`); set them explicitly only if a generated client needs them.
+  - No `@ResponseStatus` on exceptions, although the springdoc documentation suggests it for describing responses.
+  - `OpenApiIntegrationTest` checks the generated spec against hardcoded tables of operations, response codes and parameters.
+- Alternatives: package by layer (global `controllers/`, `services/`); a separate `message/` feature with its own service, which would create a second write path for messages; MapStruct. These add indirection or weaken the single write path.
 
 ## ADR-009: Authentication and authorization
 Status: Accepted
@@ -92,7 +96,7 @@ Status: Accepted
 - Decision: Spring Security as an OAuth2 resource server with JWTs signed by the application's own key. No custom security filters.
 - Tokens: issued at `POST /api/auth/login` (FR-01) by `NimbusJwtEncoder`, HS256 with a symmetric key from `app.jwt.secret` (Base64, at least 256 bits, no default; `APP_JWT_SECRET` outside demo and tests). Claims: `iss`, `sub` (user id), `role`, `iat`, `exp`; no email or other personal data. Lifetime 60 minutes, no refresh token (NFR-01).
 - Verification: `NimbusJwtDecoder` accepts HS256 only and validates the issuer, `exp` (required) and `nbf` against the application clock with the default 60 s skew.
-- URL zones: `/api/customer/**` requires CUSTOMER, `/api/agent/**` requires AGENT, `POST /api/auth/login`, `GET /actuator/health` and `/error` are public, everything else is denied. Each role has its own endpoints and DTOs, so fields such as the assignee cannot leak to customers, and BR-02 is enforced in one place.
+- URL zones: `/api/customer/**` requires CUSTOMER, `/api/agent/**` requires AGENT, `POST /api/auth/login`, `GET /actuator/health`, `/error` and the GET-only API docs paths (ADR-008) are public, everything else is denied. Each role has its own endpoints and DTOs, so fields such as the assignee cannot leak to customers, and BR-02 is enforced in one place.
 - Authorities: the `role` claim maps to `ROLE_<role>`. A valid token with a missing or unknown role gets no role authority and receives 403, not 401 (the caller is authenticated but not permitted, RFC 6750).
 - Errors: 401 and 403 are Problem Details built by the common exception handler (NFR-03). Every rejected token gets the same body and `WWW-Authenticate: Bearer error="invalid_token"` without a description; the reason (expired, forged, malformed) is never disclosed.
 - Stateless sessions; CSRF, form login, HTTP basic and logout are disabled because the token travels in the Authorization header, not in a cookie. No CORS: the frontend reaches the API same-origin through a dev proxy, and through a reverse proxy in production.

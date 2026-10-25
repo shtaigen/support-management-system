@@ -58,6 +58,7 @@ add other security dependencies without asking first.
   | Path | Access |
   |---|---|
   | `POST /api/auth/login`, `GET /actuator/health`, `/error` | public |
+  | `GET /v3/api-docs`, `/v3/api-docs/**`, `/v3/api-docs.yaml`, `/swagger-ui.html`, `/swagger-ui/**` | public (GET only) |
   | `/api/customer/**` | CUSTOMER |
   | `/api/agent/**` | AGENT |
   | anything else | denied (401 without a token, 403 with one) |
@@ -65,8 +66,6 @@ add other security dependencies without asking first.
   A new endpoint must live under its role's prefix, or it is unreachable. Each role gets its own
   endpoints and DTOs, so fields such as the assignee cannot leak to customers. There is no method
   security (`@PreAuthorize`) yet.
-- NFR-07 (OpenAPI): the API docs and Swagger UI paths are denied by default too. They will need
-  explicit `permitAll` rules when springdoc is added.
 - 401 and 403 are Problem Details built by `ApiExceptionHandler`: `SecurityProblemHandler` passes an
   `ErrorResponseException` to the MVC exception resolver. Every rejected token gets the same body
   and `WWW-Authenticate: Bearer error="invalid_token"` (plain `Bearer` when no token was sent). Never
@@ -86,6 +85,21 @@ default in `application.yaml`, and startup fails if it is missing or too short.
 Never log passwords, hashes or tokens (NFR-02). Request/response records that hold them mask
 `toString()`.
 
+## OpenAPI (NFR-07, ADR-008)
+springdoc 3.2.0, configured in `common/OpenApiConfig` (API info, bearer scheme, global security
+requirement) and in `application.yaml` (`springdoc.*`). A new endpoint needs:
+- `@Tag` on its controller and `@Operation(summary = "FR-xx: ...")` on the method.
+- A bare success `@ApiResponse` (200, or 201 for a create): once any `@ApiResponse` is declared,
+  springdoc no longer generates the success response. Its schema still comes from the return type.
+- An `@ApiResponse` with the `ProblemDetail` schema (`application/problem+json`) for every 4xx it
+  can return: its FR Errors row, 401 when authenticated, 403 for the wrong role, 400 when a path
+  or query value can fail conversion. Never declare 500.
+- An entry in the tables of `OpenApiIntegrationTest` (operations, response codes, parameters).
+Do not add `produces` (the default is `application/json`). A public endpoint opts out of the
+global security requirement with an empty `@SecurityRequirements`, as login does. Never use
+`@ResponseStatus` to describe a response, although the springdoc documentation suggests it.
+
+## Exceptions and tests
 - Never annotate exceptions with @ResponseStatus: the catch-all @ExceptionHandler(Exception.class) in ApiExceptionHandler runs first and would turn them into 500. 
 An API error with a fixed status extends ErrorResponseException (see auth/InvalidCredentialsException, ticket/TicketNotFoundException).
 

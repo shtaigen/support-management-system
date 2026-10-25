@@ -124,3 +124,15 @@ Lesson: A test for an order the database does not guarantee needs enough tied ro
 ## 2026-10-22: A tie-break test passed by chance
 In step 5e, removing the customer id tie-breaker from the summary query did not fail any test. With three tied rows, Postgres returned the HashAggregate output in an order that happened to be id descending; with six tied rows it came back id ascending in every run. The order of tied rows is not random, only not guaranteed, so a small group can match the expected order by accident. The agent suggested creating customers out of id order, which identity columns make impossible; the fix was a larger tied group and three mutation runs.
 Lesson: For an order the database does not guarantee, use enough tied rows to break an accidental match, and run the mutation more than once.
+
+## 2026-10-25: Operation count taken from FR ids, not from the code
+The step 6a prompt said the spec has "exactly the 12 FR operations plus login", but FR-01 is login itself and FR-02 has no endpoint, so the API has 11 operations. The agent checked the controllers and asked instead of inventing an operation. The same planning pass found FR Errors rows that omit codes the endpoints really return (403 on FR-06/FR-10, 400 for a malformed path id), so the spec follows the real behaviour and the rows were fixed.
+Lesson: Derive counts and response codes for a prompt from the code and ADRs, not from requirement numbering; when docs and behaviour disagree, document the behaviour and fix the docs.
+
+## 2026-10-25: Declared responses replace springdoc's generated success response
+Once an operation declared any @ApiResponse, springdoc stopped generating its 200, and the first test run caught it on 10 operations. The fix was a bare @ApiResponse for the success code, which still gets its schema from the return type, so no @ResponseStatus was needed. The table-driven test of response codes is what made the gap visible.
+Lesson: When a framework fills in defaults, check what disappears as soon as you declare one item explicitly; a table-driven test against the generated output catches it.
+
+## 2026-10-25: A mutation that changes nothing is a finding
+Setting springdoc.override-with-generic-response back to true produced a byte-identical spec, because our exception handlers have no @ResponseStatus, so there is nothing for springdoc to copy. The setting stays as a guard for the future, and the ADR says it has no visible effect today.
+Lesson: When a mutation changes nothing, record that the setting is currently inert instead of inventing a test that passes either way.
