@@ -15,6 +15,14 @@ spring:
     hibernate:
       ddl-auto: validate
 
+springdoc:
+  # Error responses are declared per operation (ADR-008), not derived from the exception handlers.
+  override-with-generic-response: false
+  # The controllers declare no produces; success responses are JSON.
+  default-produces-media-type: application/json
+  # Sorted keys keep the spec deterministic.
+  writer-with-order-by-keys: true
+
 app:
   jwt:
     # The signing key has no default here: set APP_JWT_SECRET (Base64, at least 32 random bytes).

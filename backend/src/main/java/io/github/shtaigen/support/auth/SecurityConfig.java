@@ -32,6 +32,9 @@ class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
                         .requestMatchers(HttpMethod.GET, "/actuator/health").permitAll()
+                        // OpenAPI spec and Swagger UI (NFR-07), public in every profile.
+                        .requestMatchers(HttpMethod.GET, "/v3/api-docs", "/v3/api-docs/**", "/v3/api-docs.yaml",
+                                "/swagger-ui.html", "/swagger-ui/**").permitAll()
                         // Errors forwarded to /error must keep their status instead of becoming 401.
                         .requestMatchers("/error").permitAll()
                         .requestMatchers("/api/customer/**").hasRole("CUSTOMER")
