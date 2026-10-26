@@ -292,6 +292,7 @@ The OpenAPI spec does not show every constraint: `subject` and `message` appear 
 
 #### 7. Ticket list (FR-04)
 - A single-choice status filter: All, Open, Answered, Customer replied, Closed. "All" sends no `status` parameter. The choice lives in a signal, not in the URL.
+- Changing the filter cancels the pending list request (`switchMap`), so only the response for the current filter is shown. "Retry" repeats the request for the current filter.
 - Each row shows subject, category, reference number, status and last activity, and opens the thread. A "New ticket" action opens the form.
 
 #### 8. States and display
@@ -306,7 +307,7 @@ Vitest with `provideHttpClientTesting` and `HttpTestingController`, `MemoryStora
 - Polling: the next request starts only after the previous one completed (a slow response produces no second request); a poll response that started before a message post and arrives after it is ignored; hidden tab → no requests, visible again → one request at once; destroy stops polling; 404 and 400 stop polling and show "Ticket not found"; a 5xx keeps the old thread, shows the note and polling continues.
 - Form: field errors from `errors[]` land on their controls regardless of order; two messages for one field are both shown; an unknown field and a 400 without `errors` show the message above the form; a server error clears when its control changes; double submit sends one request; success navigates to the thread with `replaceUrl`; boundary lengths (200/201 after trimming, 4000/4001, reference number 50/51).
 - Composer: double submit sends one request; error keeps the text; success clears it; 409 shows the detail and reloads; the CLOSED hint is shown only for CLOSED.
-- List: "All" sends no parameter; a filter sends `?status=...`; empty and filtered-empty texts; error with Retry.
+- List: "All" sends no parameter; a filter sends `?status=...`; changing the filter cancels the pending request; empty and filtered-empty texts; error with Retry for the current filter.
 
 ### Consequences
 - A reloaded thread page reloads the conversation; the filter on the list resets to All after a reload.
