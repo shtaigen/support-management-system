@@ -296,7 +296,7 @@ The OpenAPI spec does not show every constraint: `subject` and `message` appear 
 - Each row shows subject, category, reference number, status and last activity, and opens the thread. A "New ticket" action opens the form.
 
 #### 8. States and display
-- First load: a spinner. Polls never show a spinner.
+- The list shows a spinner instead of the rows, the empty text or the error on every pending request (first load, filter change, Retry). The filter stays enabled, so changing it again cancels the pending request. The thread shows a spinner only on its first load; polls never show one.
 - Empty list: "No tickets yet" with a "New ticket" action. Empty result with a filter: "No tickets with this status".
 - A failed load: `toProblem().detail` with a "Retry" button.
 - Dates use `DatePipe` in the browser's time zone. Status and category labels are defined in one place in the zone.
