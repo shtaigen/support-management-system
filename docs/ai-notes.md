@@ -140,3 +140,15 @@ Lesson: When a mutation changes nothing, record that the setting is currently in
 ## 2026-10-25: Login response shape differs from the handoff notes
 While verifying the dev proxy with curl, the real FR-01 response turned out to be {accessToken, expiresAt, user: {id, name, role}}, not the flat {token, id, name, role} remembered in the handoff. The server already returns the expiry instant, so the frontend does not need to decode the JWT at all.
 Lesson: take API shapes from a live response or the OpenAPI spec, never from notes or memory.
+
+## 2026-10-25: Status 0 is not reachable through the dev proxy
+With the backend stopped, a request through the Angular dev server proxy returns a 5xx from the proxy itself, not a network error, so the "Cannot reach the server" branch (status 0) only shows when the dev server itself is down.
+Lesson: When testing network-failure handling behind a proxy, decide which hop fails; the client sees the nearest hop.
+
+## 2026-10-25: Status 0 is not reachable through the dev proxy
+With the backend stopped, a login request through the Angular dev server proxy returned 502 Bad Gateway from the proxy itself, not a network error, so the form showed the generic message. The "Cannot reach the server" branch (status 0) appeared only after the dev server itself was stopped with the page still open.
+Lesson: When testing network-failure handling behind a proxy, decide which hop fails; the client sees the nearest hop.
+
+## 2026-10-25: Confirm the clean suite is green after each mutation
+During mutation checks in step 6c, the restored code failed its own tests, and the first round of mutation results was invalid. The agent blamed a cache, but the real cause was not proven.
+Lesson: After restoring each mutation, run the suite on clean code and confirm it is green before applying the next one; otherwise every later result is suspect.
