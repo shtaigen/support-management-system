@@ -35,6 +35,13 @@ There is no global Angular CLI: use npm scripts or `npx ng ...`, never bare `ng`
     403 never logs out.
   - Guards return a `UrlTree`. They are UX only; the backend enforces access.
 
+## Customer zone
+- The customer zone follows ADR-015 in `docs/decisions.md`. Read it before changing anything in
+  `features/client/`. If ADR-015 does not decide something, stop and ask.
+- Validation rules come from `docs/requirements.md` (FR-03, BR-11, BR-18), not from the OpenAPI
+  spec, which does not show every constraint.
+- Never convert a ticket id from the URL to a number; pass it through as a string.
+
 ## Styling
 The Angular Material M3 theme (azure primary, blue tertiary) is defined in `src/styles.scss`.
 Use `--mat-sys-*` variables instead of hardcoded colors; change the theme only there.

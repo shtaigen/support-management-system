@@ -105,7 +105,7 @@ Status: Accepted
 - Alternatives: server sessions with cookies; a hand-written JWT filter; shared API paths with method security (`@PreAuthorize`) and per-role serialization.
 
 ## ADR-010: Chat delivery
-Status: Planned
+Status: Accepted for polling (implemented in the customer zone, details in ADR-015); SSE is still Planned.
 
 - Decision: start with REST plus polling every 3-5 seconds, only while a ticket chat is open. Later: Server-Sent Events.
 - Why not WebSocket: messages are sent through REST anyway; push is needed in one direction only. SSE is simpler to run and secure.
@@ -228,3 +228,94 @@ Vitest with `provideHttpClientTesting` and `HttpTestingController`; guards, redi
 - Decoding `exp` from the JWT on the client; a logout timer.
 - One combined interceptor; class-based interceptors.
 - Signal Forms.
+
+## ADR-015: Customer zone
+
+**Status:** Accepted
+**Date:** 2026-10-26
+
+### Context
+The customer zone covers FR-03..FR-06 on top of the authentication from ADR-014. Response shapes were checked against `/v3/api-docs.yaml` and live responses:
+
+    POST /api/customer/tickets            201, Location header, body CustomerTicketResponse
+    GET  /api/customer/tickets?status=... 200, CustomerTicketSummary[]
+    GET  /api/customer/tickets/{id}       200, CustomerTicketResponse
+    POST /api/customer/tickets/{id}/messages  200, CustomerTicketResponse (updated status)
+
+    CustomerTicketSummary:  id, subject, category, referenceNumber (string | null), status, createdAt, lastMessageAt
+    CustomerTicketResponse: the same fields + messages[{ id, body, createdAt, authorRole }]
+
+A validation failure returns 400 with `detail` "Validation failed." and a top-level `errors[{ field, message }]`. The order of `errors` is not guaranteed, and one field can have several entries. An unreadable body (for example an unknown category) returns 400 "Failed to read request" without `errors`. A non-numeric path id returns 400, a missing or foreign ticket 404 (BR-01).
+
+The OpenAPI spec does not show every constraint: `subject` and `message` appear with `minLength: 0` and outside `required`, because the custom not-blank check is invisible to springdoc, and `errors` is not part of the `ProblemDetail` schema. Client rules therefore come from `docs/requirements.md`, not from the spec.
+
+### Decision
+
+#### 1. Routes
+- Under the lazy `/client` tree (ADR-011): `''` → ticket list (FR-04), `tickets/new` → new ticket (FR-03), `tickets/:id` → thread (FR-05, FR-06). `tickets/new` is declared before `tickets/:id`. `ROLE_HOME` stays `/client`.
+- A parent `ClientShell` component wraps the three pages and holds the zone navigation: a link to the list, the user's name and "Log out" (FR-02). The pages themselves have no logout button.
+- After a successful create the app navigates to the new thread with `replaceUrl: true`, so Back returns to the list, not to the form.
+
+#### 2. API service and types
+- `features/client/customer-tickets-api.ts`: `providedIn: 'root'`, methods `list(status?)`, `get(id)`, `create(request)`, `postMessage(id, body)`, each returning an `Observable` from `HttpClient`. URLs are relative `/api/customer/...` (the auth interceptor adds the token).
+- Types are written by hand from the OpenAPI spec in `features/client/customer-ticket.ts`. No client generator (operationIds are generated, see the backlog).
+- Not `httpResource`: polling needs explicit control over when a request starts and which response is applied.
+
+#### 3. Ticket id
+- The `:id` route parameter is kept as a string and passed to the URL with `encodeURIComponent`, never converted to a number: a Java `long` can exceed `Number.MAX_SAFE_INTEGER`. The backend validates it.
+- 400 and 404 from `GET /tickets/{id}` show the same "Ticket not found" view with a link to the list, and polling stops.
+
+#### 4. Polling (NFR-06, ADR-010)
+- Only on the thread page, every 4 seconds.
+- The next poll is scheduled when the previous request has finished, so requests never overlap.
+- While `document.visibilityState` is `hidden`, polling pauses; when the tab becomes visible, a request is sent at once.
+- Polling stops when the page is destroyed (`DestroyRef`).
+- Every response carries the whole thread and replaces the state.
+- Every thread request (initial load, poll, reload, message post) gets an increasing sequence number. A response is applied only if its number is greater than the last applied one, so a poll that started before a message post cannot overwrite the newer thread.
+- Poll errors: 401 is handled by the interceptor (ADR-014); 400/404 → "Ticket not found" and polling stops; network or 5xx → the last data stays, a non-blocking "Cannot refresh the conversation" note is shown, polling continues, and the note disappears after the next success.
+- The ticket list is not polled; it loads when the page opens and when the filter changes.
+
+#### 5. New ticket form (FR-03)
+- Typed Reactive Forms (`nonNullable`), as in ADR-014 §7.
+- Client validators follow FR-03, BR-11 and BR-18: `subject` required, not blank, at most 200 characters after trimming; `category` required, one of `GENERAL`, `POLICY`, `CLAIM`; `referenceNumber` optional, a blank value counts as absent, otherwise after trimming 1–50 characters of `[A-Za-z0-9-]`; `message` required, not blank, at most 4000 characters counted as typed. Lengths are JavaScript string lengths (UTF-16 code units), the same unit as Java's `String.length()`.
+- Values are sent as typed; the server normalizes them.
+- On 400 with `errors`: each entry is set on the control named by `field` as the error `server`; several messages for one field are joined with "; ". A server error is cleared when the user edits that control. Entries with an unknown `field`, and errors without `errors`, are shown as one message above the form from `toProblem().detail`.
+- A `submitting` signal disables the button; the submit handler also ignores submits while a request is pending.
+
+#### 6. Thread and composer (FR-05, FR-06)
+- Messages in server order (NFR-05). Customer and agent messages are visually distinct by `authorRole`.
+- Message bodies are rendered with interpolation and `white-space: pre-wrap`, never `innerHTML`.
+- Composer: `body` required, not blank, at most 4000 characters; sent only with the button (Enter adds a new line). A `submitting` signal guards against double submits, as in §5.
+- On a CLOSED ticket the composer stays available with the hint "Sending a message reopens this ticket."
+- On success the text is cleared and the thread from the response is applied (§4). On any error the text stays and `toProblem().detail` is shown; on 409 the thread is also reloaded at once. 404 shows "Ticket not found" as in §3.
+- No optimistic message before the response.
+
+#### 7. Ticket list (FR-04)
+- A single-choice status filter: All, Open, Answered, Customer replied, Closed. "All" sends no `status` parameter. The choice lives in a signal, not in the URL.
+- Each row shows subject, category, reference number, status and last activity, and opens the thread. A "New ticket" action opens the form.
+
+#### 8. States and display
+- First load: a spinner. Polls never show a spinner.
+- Empty list: "No tickets yet" with a "New ticket" action. Empty result with a filter: "No tickets with this status".
+- A failed load: `toProblem().detail` with a "Retry" button.
+- Dates use `DatePipe` in the browser's time zone. Status and category labels are defined in one place in the zone.
+
+### Tests
+Vitest with `provideHttpClientTesting` and `HttpTestingController`, `MemoryStorage` per TestBed; polling time through Vitest fake timers. Required cases:
+- API service: each method calls the right URL and method; `list()` without a status sends no parameter; an id is URL-encoded and not converted to a number.
+- Polling: the next request starts only after the previous one completed (a slow response produces no second request); a poll response that started before a message post and arrives after it is ignored; hidden tab → no requests, visible again → one request at once; destroy stops polling; 404 and 400 stop polling and show "Ticket not found"; a 5xx keeps the old thread, shows the note and polling continues.
+- Form: field errors from `errors[]` land on their controls regardless of order; two messages for one field are both shown; an unknown field and a 400 without `errors` show the message above the form; a server error clears when its control changes; double submit sends one request; success navigates to the thread with `replaceUrl`; boundary lengths (200/201 after trimming, 4000/4001, reference number 50/51).
+- Composer: double submit sends one request; error keeps the text; success clears it; 409 shows the detail and reloads; the CLOSED hint is shown only for CLOSED.
+- List: "All" sends no parameter; a filter sends `?status=...`; empty and filtered-empty texts; error with Retry.
+
+### Consequences
+- A reloaded thread page reloads the conversation; the filter on the list resets to All after a reload.
+- With polling every 4 seconds, an agent reply appears in up to about 4 seconds plus request time while the tab is visible.
+- The server stays the only authority for validation (NFR-04); client checks only prevent obvious round trips.
+
+### Alternatives considered
+- Filter in the URL query string (survives a reload; deferred).
+- `httpResource` or `rxResource` for loading and polling.
+- A fixed `setInterval` (requests can overlap) instead of scheduling after completion.
+- An optimistic message before the server response.
+- A generated API client from the OpenAPI spec.

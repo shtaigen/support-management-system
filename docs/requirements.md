@@ -109,7 +109,7 @@ Common error responses, used by all FRs (details in NFR-03):
 | Actor | Customer, Agent |
 | Description | The user ends the session on this client. |
 | Inputs | None. |
-| Outcome | An access token (NFR-01), the instant it expires, and the user's id, name and role. The client opens the zone for that role. |
+| Outcome | The session is removed from this client and the login page opens. The token itself stays valid until it expires (NFR-01). |
 | Errors | None. |
 | Source | PD (agreed in review) |
 

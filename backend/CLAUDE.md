@@ -71,8 +71,8 @@ add other security dependencies without asking first.
   and `WWW-Authenticate: Bearer error="invalid_token"` (plain `Bearer` when no token was sent). Never
   add the rejection reason to the body or the header.
 - Sessions are stateless. CSRF, form login, HTTP basic and logout are disabled (bearer header, no
-  cookies). There is no CORS on purpose: the Angular dev server is to proxy `/api` (not set up yet),
-  so calls stay same-origin.
+  cookies). There is no CORS on purpose: the Angular dev server proxies `/api` to the backend
+  (`frontend/proxy.conf.json`), so calls stay same-origin.
 
 JWT signing key `app.jwt.secret`: Base64, at least 32 random bytes after decoding. There is no
 default in `application.yaml`, and startup fails if it is missing or too short.
