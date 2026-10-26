@@ -1,11 +1,11 @@
 import { Routes } from '@angular/router';
-import { clientGuard, staffGuard } from './core/auth/role.guards';
+import { clientGuard, guestGuard, staffGuard } from './core/auth/guards';
+import { homeRedirect } from './core/auth/home-redirect';
 import { Login } from './features/auth/login';
-import { NotFound } from './features/not-found/not-found';
 
 export const routes: Routes = [
-  { path: '', pathMatch: 'full', redirectTo: 'login' },
-  { path: 'login', component: Login, title: 'Login' },
+  { path: '', pathMatch: 'full', redirectTo: homeRedirect },
+  { path: 'login', canMatch: [guestGuard], component: Login, title: 'Login' },
   {
     path: 'client',
     canMatch: [clientGuard],
@@ -16,5 +16,5 @@ export const routes: Routes = [
     canMatch: [staffGuard],
     loadChildren: () => import('./features/staff/staff.routes'),
   },
-  { path: '**', component: NotFound, title: 'Not found' },
+  { path: '**', redirectTo: homeRedirect },
 ];
