@@ -152,3 +152,7 @@ Lesson: When testing network-failure handling behind a proxy, decide which hop f
 ## 2026-10-25: Confirm the clean suite is green after each mutation
 During mutation checks in step 6c, the restored code failed its own tests, and the first round of mutation results was invalid. The agent blamed a cache, but the real cause was not proven.
 Lesson: After restoring each mutation, run the suite on clean code and confirm it is green before applying the next one; otherwise every later result is suspect.
+
+## 2026-10-26: Lazy routes do not keep library code out of the initial bundle
+The step 7a plan said that all new code was lazy-loaded and the initial bundle would not change. The build showed 453.59 kB growing to 489.14 kB. A baseline build of the previous commit and a comparison of the esbuild metafiles showed that no file of the customer zone was in the initial chunks; the growth came from library files that the initial code already used, such as `@angular/common` and the router, which now also carry the parts only the zone needs. esbuild puts each module into exactly one chunk.
+Lesson: Check every size claim in the agent's plan against the build output, and explain a change in the initial bundle with the metafile before committing.

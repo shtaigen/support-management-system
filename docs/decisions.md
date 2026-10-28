@@ -313,6 +313,7 @@ Vitest with `provideHttpClientTesting` and `HttpTestingController`, `MemoryStora
 - A reloaded thread page reloads the conversation; the filter on the list resets to All after a reload.
 - With polling every 4 seconds, an agent reply appears in up to about 4 seconds plus request time while the tab is visible.
 - The server stays the only authority for validation (NFR-04); client checks only prevent obvious round trips.
+- Lazy routes do not keep shared library code out of the initial bundle. esbuild puts each module into exactly one chunk, so a library file the initial code already uses (`@angular/common`, the router, Material ripple) also carries the parts that only the customer zone needs. Step 7a grew the initial bundle from 453.59 kB to 489.14 kB, although no file of the zone is in it; the zone's own code stays in its lazy chunk. The 500 kB warning budget stays; if a later step reaches it, measure with `ng build --stats-json` before choosing a fix.
 
 ### Alternatives considered
 - Filter in the URL query string (survives a reload; deferred).
