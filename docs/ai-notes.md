@@ -155,4 +155,8 @@ Lesson: After restoring each mutation, run the suite on clean code and confirm i
 
 ## 2026-10-26: Lazy routes do not keep library code out of the initial bundle
 The step 7a plan said that all new code was lazy-loaded and the initial bundle would not change. The build showed 453.59 kB growing to 489.14 kB. A baseline build of the previous commit and a comparison of the esbuild metafiles showed that no file of the customer zone was in the initial chunks; the growth came from library files that the initial code already used, such as `@angular/common` and the router, which now also carry the parts only the zone needs. esbuild puts each module into exactly one chunk.
-Lesson: Check every size claim in the agent's plan against the build output, and explain a change in the initial bundle with the metafile before committing.
+Lesson: Check every size claim in the agent's plan against the build output, and explain a change in the initial bundle with the metafile before committing.git push
+
+## 2026-10-28: A long prompt was cut when pasted into the terminal
+The step 7b prompt was cut after the fourth scope item when pasted into Claude Code. The agent planned only from what it received: three mutations instead of eighteen, a bundle size prediction, and an incomplete verification list. In review this looked like the agent ignoring the prompt; the agent itself found the cause when asked for the missing mutation list.
+Lesson: after pasting a long prompt, check that the agent saw its end (for example, ask it to quote the last line); pass long parts as a file. Before blaming the agent for skipped requirements, check what it actually received.

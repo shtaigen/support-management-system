@@ -233,7 +233,7 @@ Vitest with `provideHttpClientTesting` and `HttpTestingController`; guards, redi
 
 **Status:** Accepted
 **Date:** 2026-10-26
-**Amended:** 2026-10-28 (thread page details before step 7b)
+**Amended:** 2026-10-28 (thread page details, post errors and Java whitespace before step 7b)
 
 ### Context
 The customer zone covers FR-03..FR-06 on top of the authentication from ADR-014. Response shapes were checked against `/v3/api-docs.yaml` and live responses:
@@ -269,23 +269,25 @@ The OpenAPI spec does not show every constraint: `subject` and `message` appear 
 
 #### 4. Polling (NFR-06, ADR-010)
 - Only on the thread page, every 4 seconds, starting after the first successful load.
-- The next poll is scheduled when the previous poll has finished, with success or error, so at most one poll request is in flight. A reload (§6) and a message post are separate requests and may run alongside a poll; sequence numbers decide which response wins.
+- Only two completions schedule the next poll: the first successful load and a poll. A reload (§6) and a message post never schedule one. There is one timer: scheduling clears the pending timer first, and it does nothing unless polling is active, the page is not destroyed and the tab is visible. The check happens at the moment of scheduling, because completion handlers also run when a request is cancelled or has failed. At most one poll is in flight; a reload and a post may run alongside a poll, and sequence numbers decide which response wins.
 - Tab visibility comes from `document.visibilityState` and the `visibilitychange` event, with `document` taken from `inject(DOCUMENT)` so tests can control it:
   - when the tab becomes hidden, a scheduled poll is cancelled; a poll already in flight completes and is applied, but the next one is not scheduled;
   - when the tab becomes visible, a poll is sent at once, unless one is already in flight; after it, polling continues on the normal schedule;
   - if the tab is hidden when the page opens, the first load still runs, and polling starts when the tab becomes visible.
-- Polling stops when the page is destroyed (`DestroyRef`).
+- Polling stops when the page is destroyed (`DestroyRef`); the visibility listener is removed and requests in flight are cancelled.
 - Every response carries the whole thread and replaces the state.
-- Every thread request (first load, poll, reload, message post) gets an increasing sequence number when it starts. A response, success or error, is applied only if its number is greater than the last applied one; a stale response is ignored completely, including its error. So a poll that started before a message post cannot overwrite the newer thread, and a stale failed poll cannot show the error note after a newer success. The composer outcome is the exception (§6).
-- Errors of thread requests:
-  - 401: the interceptor ends the session (ADR-014), and the page stops polling itself; it does not rely on being destroyed by the navigation;
+- Every thread request (first load, Retry, poll, reload, message post) gets an increasing sequence number when it starts. A response, success or error, is applied only if its number is greater than the last applied one; a stale response is ignored completely, including its error. So a poll that started before a message post cannot overwrite the newer thread, and a stale failed poll cannot show the error note after a newer success. Two exceptions: a 401 always stops polling, even when it is stale, because the session is over; and the composer outcome follows the post's own response (§6).
+- Errors of the first load, polls and reloads:
+  - 401: the interceptor ends the session (ADR-014), and the page stops polling itself; it does not rely on being destroyed by the navigation. The page shows nothing of its own (ADR-014): on the first load the spinner stays; after it, the thread stays without a note;
   - 400/404: "Ticket not found", polling stops;
-  - any other error (network, 5xx): the last data stays, a non-blocking "Cannot refresh the conversation" note is shown, polling continues, and the note disappears after the next applied success.
+  - any other error (network, 5xx): before the first success, the first-load error view (§8); after it, the last data stays, a non-blocking "Cannot refresh the conversation" note is shown, polling continues, and the note disappears after the next applied success.
+- Errors of a message post belong to the composer (§6) and never change the thread state: no note, and they do not count as applied. The exceptions are 404 ("Ticket not found" and polling stops, sequence-checked like any thread response), 401 (polling stops) and 409 (a reload).
 - The ticket list is not polled; it loads when the page opens and when the filter changes.
 
 #### 5. New ticket form (FR-03)
 - Typed Reactive Forms (`nonNullable`), as in ADR-014 §7.
 - Client validators follow FR-03, BR-11 and BR-18: `subject` required, not blank, at most 200 characters after trimming; `category` required, one of `GENERAL`, `POLICY`, `CLAIM`; `referenceNumber` optional, a blank value counts as absent, otherwise after trimming 1–50 characters of `[A-Za-z0-9-]`; `message` required, not blank, at most 4000 characters counted as typed. Lengths are JavaScript string lengths (UTF-16 code units), the same unit as Java's `String.length()`.
+- "Blank" and "trimming" follow Java, because the backend uses `String.isBlank()` and `strip()` and never `trim()` (`NotBlankTextValidator`, `Message`, `Ticket`). A character is whitespace when `Character.isWhitespace` says so: U+0009–U+000D, U+001C–U+001F and the Unicode categories Zs, Zl and Zp except U+00A0, U+2007 and U+202F. U+FEFF is not whitespace. A value is blank when it has only such characters; trimming removes them from both ends. One helper in `features/client` implements this for the form and the composer. NUL characters, which the backend also rejects, are not checked on the client; the server's 400 is shown.
 - Values are sent as typed; the server normalizes them.
 - On 400 with `errors`: each entry is set on the control named by `field` as the error `server`; several messages for one field are joined with "; ". A server error is cleared when the user edits that control. Entries with an unknown `field`, and errors without `errors`, are shown as one message above the form from `toProblem().detail`.
 - A `submitting` signal disables the button; the submit handler also ignores submits while a request is pending.
@@ -295,9 +297,9 @@ The OpenAPI spec does not show every constraint: `subject` and `message` appear 
 - Messages in server order (NFR-05). Customer and agent messages are visually distinct by `authorRole` and labelled "You" and "Agent"; each shows its date.
 - Message bodies are rendered with interpolation and `white-space: pre-wrap`, never `innerHTML`.
 - The composer appears after the first successful load and is not shown in the "Ticket not found" view.
-- Composer: `body` required, not blank, at most 4000 characters counted as typed (UTF-16 code units, §5); sent only with the button (Enter adds a new line). There is no `maxlength` attribute, because the browser would silently cut pasted text; a hint shows the count as "n / 4000". The send button is disabled while the body is invalid or a post is pending, and the submit handler also ignores submits while a post is pending (§5).
+- Composer: `body` required, not blank (§5), at most 4000 characters counted as typed (UTF-16 code units); sent only with the button (Enter adds a new line). There is no `maxlength` attribute, because the browser would silently cut pasted text; a hint shows the count as "n / 4000". The send button is disabled while the body is invalid or a post is pending, and the submit handler also ignores submits while a post is pending (§5). Invalid input shows no error text beyond the disabled button and the count.
 - On a CLOSED ticket the composer stays available with the hint "Sending a message reopens this ticket."
-- The composer outcome follows the post's own response, even when its thread is stale and not applied (§4): on success the text is cleared; on any error the text stays and `toProblem().detail` is shown under the composer until the user edits the text or sends again. On 409 the thread is also reloaded at once, as a new numbered request. 404 shows "Ticket not found" as in §3.
+- The composer outcome follows the post's own response, even when its thread is stale and not applied (§4): on success the text is cleared; on 401 the text stays and nothing is shown (ADR-014); on any other error the text stays and `toProblem().detail` is shown under the composer until the user edits the text or sends again. On 409 the thread is also reloaded at once, as a new numbered request. 404 shows "Ticket not found" as in §3.
 - No optimistic message before the response.
 
 #### 7. Ticket list (FR-04)
@@ -316,11 +318,12 @@ The OpenAPI spec does not show every constraint: `subject` and `message` appear 
 ### Tests
 Vitest with `provideHttpClientTesting` and `HttpTestingController`, `MemoryStorage` per TestBed; polling time through Vitest fake timers; tab visibility through a controlled `document`. Required cases:
 - API service: each method calls the right URL and method; `list()` without a status sends no parameter; an id is URL-encoded and not converted to a number.
-- Polling: the next request starts only after the previous one completed (a slow response produces no second request); a poll response that started before a message post and arrives after it is ignored; a stale poll error after a newer success shows no note; hidden tab → no requests, visible again → one request at once; visible again while a poll is in flight → no second request; hidden when the page opens → the first load runs, no poll until visible; destroy stops polling; 401 stops polling without destroying the page; 404 and 400 stop polling and show "Ticket not found"; a 5xx keeps the old thread, shows the note, polling continues, and the note disappears after the next success.
-- Thread: the first load shows the spinner; a 5xx on the first load shows the detail and "Retry", no poll starts, and polling starts after a successful retry; the header shows the new status after a successful post; "Ref." is not shown for a null reference number.
+- Whitespace helper: spaces, tabs, newlines, U+001C, U+2028 and U+3000 are blank; U+00A0, U+2007, U+202F and U+FEFF are not; the empty string is blank.
+- Polling: the next request starts only after the previous one completed (a slow response produces no second request); a poll response that started before a message post and arrives after it is ignored; a stale poll error after a newer success shows no note; hidden tab → no requests, visible again → one request at once; visible again while a poll is in flight → no second request; hidden when the page opens → the first load runs, no poll until visible; a reload after a 409 neither adds nor moves a poll (pinned by time, not only by count); destroy while a poll is in flight cancels it and nothing is sent afterwards, also after the tab becomes visible; 401 stops polling without destroying the page, also when it is stale; 404 and 400 stop polling and show "Ticket not found"; a 5xx keeps the old thread, shows the note, polling continues, and the note disappears after the next success; a post 400 or 5xx changes no thread state.
+- Thread: the first load shows the spinner; a 5xx on the first load shows the detail and "Retry", no poll starts, and polling starts after a successful retry; a 401 on the first load keeps the spinner; the header shows the new status after a successful post; "Ref." is not shown for a null reference number.
 - Form: field errors from `errors[]` land on their controls regardless of order; two messages for one field are both shown; an unknown field and a 400 without `errors` show the message above the form; a server error clears when its control changes; double submit sends one request; success navigates to the thread with `replaceUrl`; boundary lengths (200/201 after trimming, 4000/4001, reference number 50/51).
-- Composer: double submit sends one request (the handler is called directly, not through the disabled button); error keeps the text; success clears it, also when its response is stale and not applied; 409 shows the detail and reloads; the CLOSED hint is shown only for CLOSED; boundary length 4000/4001.
-- List: "All" sends no parameter; a filter sends `?status=...`; changing the filter cancels the pending request; empty and filtered-empty texts; error with Retry for the current filter.
+- Composer: double submit sends one request (the handler is called directly, not through the disabled button); error keeps the text; success clears it, also when its response is stale and not applied; 409 shows the detail and reloads; a post 401 keeps the text and shows nothing; the CLOSED hint is shown only for CLOSED; boundary length 4000/4001, and 4000 characters plus a trailing space are invalid; a body of only U+00A0 is valid and is sent; a body of only U+001C is invalid.
+- List: "All" sends no parameter; a filter sends `?status=...`; changing the filter cancels the pending request; empty and filtered-empty texts; error with Retry for the current filter; the spinner is labelled "Loading tickets".
 
 ### Consequences
 - A reloaded thread page reloads the conversation; the filter on the list resets to All after a reload.
@@ -328,7 +331,7 @@ Vitest with `provideHttpClientTesting` and `HttpTestingController`, `MemoryStora
 - A poll that starts after a message post but is handled first by the server can win the sequence check without the new message. The text is already cleared, and the message appears with the next poll, within about 4 seconds. The window is the duration of the post request, so the case is rare.
 - A future link from one thread to another must read the id from `paramMap` and restart the load and polling, because Angular reuses the component when only the parameter changes.
 - Ids inside JSON bodies are JavaScript numbers after parsing, so the list builds thread links from numbers. They are exact up to `Number.MAX_SAFE_INTEGER` (about 9·10^15 rows); a full fix would serialize ids as strings on the backend and is out of scope.
-- The server stays the only authority for validation (NFR-04); client checks only prevent obvious round trips.
+- The server stays the only authority for validation (NFR-04); client checks only prevent obvious round trips, and with Java whitespace rules they never block a value the server accepts.
 - Lazy routes do not keep shared library code out of the initial bundle. esbuild puts each module into exactly one chunk, so a library file the initial code already uses (`@angular/common`, the router, Material ripple) also carries the parts that only the customer zone needs. Step 7a grew the initial bundle from 453.59 kB to 489.14 kB, although no file of the zone is in it; the zone's own code stays in its lazy chunk. The 500 kB warning budget stays; if a later step reaches it, measure with `ng build --stats-json` before choosing a fix.
 
 ### Alternatives considered
@@ -341,4 +344,5 @@ Vitest with `provideHttpClientTesting` and `HttpTestingController`, `MemoryStora
 - An immediate reload when a successful post response is stale: one more request and test for a rare case that the next poll covers.
 - Scrolling to the last message on load and after each response: scrolling on every poll disturbs reading older messages; doing it right needs "is the user at the bottom" tracking (deferred).
 - A `maxlength` attribute on the composer: the browser silently cuts pasted text.
-- 
+- JavaScript `trim()` for blank checks: it differs from Java in both directions, blocking bodies of U+00A0 the server accepts and letting through bodies of U+001C–U+001F the server rejects.
+- Showing post errors as the thread note: a post error answers the user's action, not the state of the thread, and would appear twice.
