@@ -99,6 +99,13 @@ describe('MyTickets', () => {
     expect(rows().length).toBe(1);
   });
 
+  it('labels the list spinner Loading tickets', async () => {
+    await open();
+    const req = expectList();
+    expect(spinner()!.getAttribute('aria-label')).toBe('Loading tickets');
+    await flush(req, []);
+  });
+
   it('shows the fields of each row in server order and links to the thread', async () => {
     await open();
     await flush(expectList(), [PRINTER, CLAIM]);

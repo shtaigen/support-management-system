@@ -60,7 +60,7 @@ const FILTERS: { label: string; status: TicketStatus | null }[] = [
 
     @let current = state();
     @if (current.kind === 'loading') {
-      <mat-progress-spinner mode="indeterminate" diameter="40" />
+      <mat-progress-spinner mode="indeterminate" diameter="40" aria-label="Loading tickets" />
     } @else if (current.kind === 'error') {
       <div class="error">
         <p role="alert">{{ current.message }}</p>

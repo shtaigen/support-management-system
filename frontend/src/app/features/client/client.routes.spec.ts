@@ -49,6 +49,13 @@ describe('client routes', () => {
     await harness.navigateByUrl('/client/tickets/42');
     expect(deepestRoute().component).toBe(TicketThread);
     expect(deepestRoute().paramMap.get('id')).toBe('42');
+    // 404 shows "Ticket not found", so polling never starts in this test.
+    httpTesting
+      .expectOne({ method: 'GET', url: `${TICKETS_URL}/42` })
+      .flush(
+        { status: 404, title: 'Not Found', detail: 'Ticket not found.' },
+        { status: 404, statusText: 'Not Found' },
+      );
   });
 
   it('resolves /client to MyTickets', async () => {
