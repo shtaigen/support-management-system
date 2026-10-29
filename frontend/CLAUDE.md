@@ -45,3 +45,8 @@ There is no global Angular CLI: use npm scripts or `npx ng ...`, never bare `ng`
 ## Styling
 The Angular Material M3 theme (azure primary, blue tertiary) is defined in `src/styles.scss`.
 Use `--mat-sys-*` variables instead of hardcoded colors; change the theme only there.
+
+## Tests
+- `vitest-base.config.mts` turns off Vitest's `fsModuleCache` (stale imported modules under @angular/build 22.2.2, angular/angular-cli#34311). Do not turn it on. Remove the file and the `runnerConfig` option in `angular.json` after upgrading to @angular/build 22.2.3 or later.
+- Before trusting mutation results, both tracers must fail: a failing `it()` in the spec and a top-level `throw` in the edited module. Every test run must print "Using Vitest configuration file".
+- A test that depends on form state (submitted, touched, error state) goes through the real submit button, not a direct call of the handler.
