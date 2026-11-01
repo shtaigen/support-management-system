@@ -47,6 +47,5 @@ The Angular Material M3 theme (azure primary, blue tertiary) is defined in `src/
 Use `--mat-sys-*` variables instead of hardcoded colors; change the theme only there.
 
 ## Tests
-- `vitest-base.config.mts` turns off Vitest's `fsModuleCache` (stale imported modules under @angular/build 22.2.2, angular/angular-cli#34311). Do not turn it on. Remove the file and the `runnerConfig` option in `angular.json` after upgrading to @angular/build 22.2.3 or later.
-- Before trusting mutation results, both tracers must fail: a failing `it()` in the spec and a top-level `throw` in the edited module. Every test run must print "Using Vitest configuration file".
+- Before trusting mutation results, both tracers must fail: a failing `it()` in the spec and a top-level `throw` in the edited module. If a tracer passes, stop and report; never clear or delete a cache to make it fail (rename it and look for the cause).
 - A test that depends on form state (submitted, touched, error state) goes through the real submit button, not a direct call of the handler.

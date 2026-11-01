@@ -118,10 +118,6 @@ For the 5d conflict tests the competing commit had to land after the client vers
 Lesson: Place a race hook between the check and the write, and prove the placement with a mutation that removes the write.
 
 ## 2026-10-22: A tie-break test passed by chance
-In step 5e, removing the customer id tie-breaker from the summary query did not fail any test. With only three tied rows, Postgres returned the HashAggregate output in an order that happened to be id descending (a 1 in 6 chance). The agent suggested creating customers out of id order, which identity columns make impossible; the fix was a larger tied group (six rows, about 1 in 720) and repeated mutation runs.
-Lesson: A test for an order the database does not guarantee needs enough tied rows that a chance pass is unlikely, and its mutation should be run more than once.
-
-## 2026-10-22: A tie-break test passed by chance
 In step 5e, removing the customer id tie-breaker from the summary query did not fail any test. With three tied rows, Postgres returned the HashAggregate output in an order that happened to be id descending; with six tied rows it came back id ascending in every run. The order of tied rows is not random, only not guaranteed, so a small group can match the expected order by accident. The agent suggested creating customers out of id order, which identity columns make impossible; the fix was a larger tied group and three mutation runs.
 Lesson: For an order the database does not guarantee, use enough tied rows to break an accidental match, and run the mutation more than once.
 
@@ -142,10 +138,6 @@ While verifying the dev proxy with curl, the real FR-01 response turned out to b
 Lesson: take API shapes from a live response or the OpenAPI spec, never from notes or memory.
 
 ## 2026-10-25: Status 0 is not reachable through the dev proxy
-With the backend stopped, a request through the Angular dev server proxy returns a 5xx from the proxy itself, not a network error, so the "Cannot reach the server" branch (status 0) only shows when the dev server itself is down.
-Lesson: When testing network-failure handling behind a proxy, decide which hop fails; the client sees the nearest hop.
-
-## 2026-10-25: Status 0 is not reachable through the dev proxy
 With the backend stopped, a login request through the Angular dev server proxy returned 502 Bad Gateway from the proxy itself, not a network error, so the form showed the generic message. The "Cannot reach the server" branch (status 0) appeared only after the dev server itself was stopped with the page still open.
 Lesson: When testing network-failure handling behind a proxy, decide which hop fails; the client sees the nearest hop.
 
@@ -155,7 +147,7 @@ Lesson: After restoring each mutation, run the suite on clean code and confirm i
 
 ## 2026-10-26: Lazy routes do not keep library code out of the initial bundle
 The step 7a plan said that all new code was lazy-loaded and the initial bundle would not change. The build showed 453.59 kB growing to 489.14 kB. A baseline build of the previous commit and a comparison of the esbuild metafiles showed that no file of the customer zone was in the initial chunks; the growth came from library files that the initial code already used, such as `@angular/common` and the router, which now also carry the parts only the zone needs. esbuild puts each module into exactly one chunk.
-Lesson: Check every size claim in the agent's plan against the build output, and explain a change in the initial bundle with the metafile before committing.git push
+Lesson: Check every size claim in the agent's plan against the build output, and explain a change in the initial bundle with the metafile before committing.
 
 ## 2026-10-28: A long prompt was cut when pasted into the terminal
 The step 7b prompt was cut after the fourth scope item when pasted into Claude Code. The agent planned only from what it received: three mutations instead of eighteen, a bundle size prediction, and an incomplete verification list. In review this looked like the agent ignoring the prompt; the agent itself found the cause when asked for the missing mutation list.
@@ -172,3 +164,7 @@ Lesson: "killed" is not enough; check which test fails and that it observes the 
 ## 2026-10-29: Manual check found a defect that 129 green tests missed
 After a successful send the composer label turned red, and an empty field turned red after blur. Cause, found by the agent in the installed source: Material's default `ErrorStateMatcher` is `invalid && (touched || submitted)`, and `form.reset()` does not reset `FormGroupDirective.submitted`. The tests called the component's `send()` directly (an accepted plan deviation for the double-submit test), so no test went through a real form submit, and none looked at the field's error state. Fixed with an error state matcher that never reports an error (ADR-015 §6, amended), with tests that submit through the button.
 Lesson: a test that calls a handler directly skips what the framework does around it. Keep at least one test per form that goes through the real submit, and check the screen by hand after the tests pass.
+
+## 2026-10-30: Upgrading a group pinned to exact peer versions
+Upgrading Angular from 22.2.2 to 22.2.4 (build, cli, material and cdk to 22.2.5) failed with ERESOLVE while the old `package-lock.json` was kept, even with every package of the group moved in `package.json` at once. The hypothesis that a one-shot change of the whole group would be enough was tested and refuted: `@angular/common` 22.2.4 needs exactly `@angular/core` 22.2.4, while the locked `@angular/forms` 22.2.2 needs exactly `@angular/common` 22.2.2, and npm checks each replacement against the locked tree. Regenerating the lock file worked. A comparison of resolved versions between the old and the new lock (a script over `packages`, not `git diff`) showed 106 changes outside `@angular/*`, all within the parents' ranges; the only major bump was inside jsdom (`@asamuzakjp/dom-selector` 9 to 10), and `npm audit` went from 6 findings to 0. Then the Vitest workaround was removed and the tracers were rerun without it: a top-level throw in the imported module failed three spec files in two consecutive runs, a failing `it()` failed one, and no `.vitest-cache` appeared.
+Lesson: regenerate the lock file to move a group with exact peer versions, and check the side effects with a diff of resolved versions. Remove a workaround only after the tracers that exposed the bug fail as expected without it.
