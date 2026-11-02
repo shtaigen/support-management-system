@@ -1,4 +1,4 @@
-import { isJavaBlank } from './java-whitespace';
+import { isJavaBlank, javaStrip } from './java-whitespace';
 
 describe('isJavaBlank', () => {
   it('treats Java whitespace as blank', () => {
@@ -21,5 +21,25 @@ describe('isJavaBlank', () => {
 
   it('does not treat text surrounded by whitespace as blank', () => {
     expect(isJavaBlank('  a  ')).toBe(false);
+  });
+});
+
+describe('javaStrip', () => {
+  it('removes Java whitespace from both ends', () => {
+    expect(javaStrip(' \t\n\u001C 　a　 ')).toBe('a');
+  });
+
+  it('keeps U+00A0, U+2007, U+202F and U+FEFF at the ends', () => {
+    expect(javaStrip(' a ')).toBe(' a ');
+    expect(javaStrip(' a ')).toBe(' a ');
+    expect(javaStrip('﻿a﻿')).toBe('﻿a﻿');
+  });
+
+  it('keeps inner whitespace', () => {
+    expect(javaStrip(' a \u001C b ')).toBe('a \u001C b');
+  });
+
+  it('strips text of only whitespace to the empty string', () => {
+    expect(javaStrip(' \t\u001C ')).toBe('');
   });
 });
