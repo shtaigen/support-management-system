@@ -406,11 +406,11 @@ Step 8a, against the real Postgres with a rollback per test, as `AgentCustomerCo
 - the caller is listed; another agent is listed; a customer is not listed;
 - each item has exactly the fields `id` and `name`;
 - own items are in name order: names share a prefix and differ in one uppercase ASCII letter, so the expected order is the same in any collation; they are created in reverse name order, so id order differs from name order;
-- two agents with the same name are in ascending id order;
+- agents with the same name are in ascending id order: at least six of them, as for every tie-break test (`backend/CLAUDE.md`, step 5e);
 - no token → 401; a customer token → 403;
 - `OpenApiIntegrationTest`: a row for FR-13 (`get /api/agent/agents`, tag "Agents", 200, `401` and `403`, secured, no parameters).
 
-Mutations, each killed by the test named above: the role condition removed (the customer appears); `u.id` ascending changed to descending (same-name agents swap; removing the secondary order is not a usable mutation, because ties would most likely still come back in insertion order); `u.name` changed to `u.id` (name order breaks); `email` added to `AgentRef` (exact fields).
+Mutations, each killed by the test named above: the role condition removed (the customer appears); `u.id` ascending changed to descending (same-name agents swap); `u.name` changed to `u.id` (name order breaks); `email` added to `AgentRef` (exact fields). The secondary order `u.id` removed is run three times: Postgres does not guarantee the order of tied rows, but it can return them in id order by accident. If it survives every run, that is recorded as a finding, not covered by a test that passes either way.
 
 ### Consequences
 - Two agents with the same name look the same in the selector and the filter. Demo accounts have unique names; showing the email would need a requirement change.
