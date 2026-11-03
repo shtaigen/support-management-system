@@ -26,7 +26,7 @@ The roles are exactly `CUSTOMER` and `AGENT` (V1 `users_role_ck`, ADR-011).
 | Role | Can see | Can do | Source |
 |---|---|---|---|
 | CUSTOMER | Only their own tickets and the messages in them. Not the assignee. | Create a ticket; post a message to an own ticket, which also reopens a closed one. | EI, PD (ADR-009, agreed in review) |
-| AGENT | All tickets of all customers; the customer's name and email; the assignee. | Reply to tickets; change status manually (close, reopen); assign and reassign tickets. | EI, PD (agreed in review) |
+| AGENT | All tickets of all customers; the customer's name and email; the assignee; the list of agents (FR-13). | Reply to tickets; change status manually (close, reopen); assign and reassign tickets. | EI, PD (agreed in review) |
 
 Data visibility:
 - A customer's access is limited to their own tickets in the database query itself, not by
@@ -213,6 +213,16 @@ Common error responses, used by all FRs (details in NFR-03):
 | Errors | 400 when `assigneeId` or `version` is missing (`errors[{field}]`). 400 with `errors[{field: "assigneeId"}]` when the user does not exist or is not an agent; both cases get the same message. Message: "must be an existing agent" (the same for a missing user, a customer and any other non-agent). 404 when the ticket does not exist. 409 with the optimistic-locking detail when `version` differs from the ticket's current version, or when another change was committed at the same time (BR-15). 403 when the caller is not an agent. Checks run in this order: request body, assignee, ticket, version. |
 | Source | PD (agreed in review, MVP; endpoint, no-op reassignment, CLOSED tickets and order of checks agreed before step 5d). Not present in EI. |
 
+### FR-13 List agents
+| Field | Value |
+|---|---|
+| Actor | Agent |
+| Description | The agent sees the list of all agents, to choose an assignee (FR-12) or an assignee filter (FR-07). |
+| Inputs | `GET /api/agent/agents`, no parameters. |
+| Outcome | Every user with role AGENT, including the caller. Each item is flat: `id`, `name`; no email, password hash or ticket data. The response is a JSON array. The role is checked in the query. It is sorted by NFR-05. |
+| Errors | 403 when the caller is not an agent. |
+| Source | PD (agreed while designing ADR-016: the FR-12 assignee selector and the FR-07 assignee filter need the agents, and an agent without tickets appears in no other response). Not present in EI. |
+
 ## 4. Business rules
 
 | ID | Rule | Source |
@@ -331,8 +341,10 @@ These are listed only. V1 is not changed, and none of these is required by the M
 - Database-level CHECKs mirroring application rules: body length (BR-11), reference-number
   format (BR-18), and assignee role (BR-10, which would need a trigger or a schema change).
 
-FR-08, FR-11 and FR-12 need no schema change. The FR-08 summary is an aggregate over
+FR-08, FR-11, FR-12 and FR-13 need no schema change. The FR-08 summary is an aggregate over
 `tickets` grouped by `customer_id`, supported by the existing `(customer_id, last_message_at DESC)` index.
+The FR-13 list reads `users` by role without an index; the table holds a few agents and the
+seeded customers, and an index would matter only with many users.
 
 ---
 
@@ -355,12 +367,13 @@ PD for the fields and actions.
 ### Agent zone
 1. **Login**: email and password (FR-01).
 2. **Ticket queue**: a table with status and assignee filters, including "unassigned" (FR-07).
+   The assignee filter offers the agents from FR-13.
 3. **By customer**: a list of customers with ticket counts and latest activity (FR-08).
    Selecting a customer opens that customer's tickets with the queue's status and assignee
    filters (FR-07 with the customer filter).
 4. **Ticket detail**: customer info, the thread, and a reply box that is disabled while the
    ticket is CLOSED (FR-09, FR-10). It has Close and Reopen actions (FR-11) and an assignee
-   selector (FR-12).
+   selector with the agents from FR-13 (FR-12).
 5. **Logout** (FR-02).
 
 While a thread is open, it refreshes by polling (NFR-06).
@@ -375,7 +388,7 @@ While a thread is open, it refreshes by polling (NFR-06).
 | NFR-02 | Passwords are stored only as hashes. Passwords and tokens are never written to logs. | PD (agreed in review) |
 | NFR-03 | Every error response uses one format: RFC 9457 Problem Details, with the status mapping in section 3 (400/401/403/404/409). | PD (ADR-008) |
 | NFR-04 | All input validation is done on the server. Client-side checks only improve usability and are never relied on. | PD (agreed in review) |
-| NFR-05 | Ticket lists are sorted by `last_message_at` descending, then `id` descending. Threads are sorted by `created_at` ascending, then `id` ascending. The customer summary (FR-08) is sorted by `lastMessageAt` descending, then customer `id` descending. | PD (V1 indexes, agreed in review) |
+| NFR-05 | Ticket lists are sorted by `last_message_at` descending, then `id` descending. Threads are sorted by `created_at` ascending, then `id` ascending. The customer summary (FR-08) is sorted by `lastMessageAt` descending, then customer `id` descending. The agent list (FR-13) is sorted by `name` ascending in the database collation, then `id` ascending. | PD (V1 indexes, agreed in review) |
 | NFR-06 | Chat updates use REST polling every 3–5 seconds, only while a thread is open. | PD (ADR-010) |
 | NFR-07 | The API is documented with OpenAPI 3.1, generated by springdoc. The spec (`/v3/api-docs`) and Swagger UI (`/swagger-ui.html`) are public. Each operation lists every 4xx response it can return, with the Problem Details schema. | PD (ADR-008) |
 | NFR-08 | Messages are written through a single write path (BR-17). No second channel bypasses validation or the status rules. | PD (agreed in review) |

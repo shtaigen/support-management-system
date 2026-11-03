@@ -364,3 +364,62 @@ Vitest with `provideHttpClientTesting` and `HttpTestingController`, `MemoryStora
 - `markAllAsTouched()` on an invalid submit: redundant with `FormGroupDirective.submitted` under the standard error rule (a mutation removing it changes nothing visible).
 - A native `<select matNativeControl>` instead of `mat-select` to stay under 500 kB: saves at most 17.38 kB of initial (unmeasured), but the same CDK code arrives with the first select or dialog in the agent zone.
 - `GENERAL` as the preselected category: fewer clicks, but tickets would end up in the wrong category when the customer does not notice the field.
+
+## ADR-016: Agent zone
+
+**Status:** Planned
+**Date:** 2026-11-03
+
+### Context
+The agent zone covers FR-07..FR-13 on top of the authentication from ADR-014; today `/staff` holds only a placeholder page with "Log out". The backend for FR-07..FR-12 is in place:
+
+    GET  /api/agent/tickets?status=&assigneeId=&unassigned=&customerId=   200, AgentTicketSummary[]
+    GET  /api/agent/customers                    200, AgentCustomerSummary[]
+    GET  /api/agent/tickets/{id}                 200, AgentTicketResponse (with version)
+    POST /api/agent/tickets/{id}/messages        200, AgentTicketResponse
+    PUT  /api/agent/tickets/{id}/status          200, AgentTicketResponse (new version)
+    PUT  /api/agent/tickets/{id}/assignee        200, AgentTicketResponse
+
+The FR-12 assignee selector ("to themselves or to another agent") and the FR-07 assignee filter need the list of agents, and no endpoint returns it. The caller's own id is in the session (ADR-014), so "assign to me" and "my tickets" work without it, but another agent can be chosen only by id. Collecting assignees from queue responses misses an agent who has no tickets and depends on the current filter. FR-13 was therefore added to the requirements before any agent zone code.
+
+The work is split into steps, one concern each:
+- 8a: backend, FR-13 (§1);
+- 8b: ticket queue and the customer summary (FR-07, FR-08);
+- 8c: ticket detail, thread, reply and polling (FR-09, FR-10);
+- 8d: status change and assignment with `version` and 409 handling (FR-11, FR-12).
+
+The frontend decisions for 8b..8d are added to this ADR before each step, as with ADR-015. Whether the agent thread shares the polling code of `features/client/ticket-thread-store.ts` or has its own store is decided before 8c.
+
+### Decision
+
+#### 1. Agent list (FR-13, step 8a)
+- `GET /api/agent/agents` in the `user/` package: the list reads users only, not the `Ticket` aggregate (ADR-008). FR-08 stays in `ticket/` because it aggregates tickets.
+- `user/AgentController` (`@Tag(name = "Agents")`, `@Operation(summary = "FR-13: List agents")`) calls a `@Transactional(readOnly = true)` method of a `user/AgentService`; controllers do not call repositories, as in FR-08.
+- Response: a JSON array of `user/AgentRef(long id, String name)`. No email: agents choose each other by name, and the field is not needed by FR-07 or FR-12. No wrapper object and no pagination (out of scope for the MVP).
+- One JPQL constructor expression in `UserRepository`: `select new ...AgentRef(u.id, u.name) from User u where u.role = AGENT order by u.name, u.id`. Only these two columns are read, so no entity and no password hash is loaded. The role is checked in the query, because the database does not check the assignee's role (section 5 of the requirements).
+- Order (NFR-05): `name` ascending in the database collation, then `id` ascending. The collation decides how case, spaces and punctuation compare; the client shows the list in server order and does not sort it again.
+- Security: `/api/agent/**` already requires AGENT (ADR-009); no configuration change. 401 without a token, 403 for a customer.
+- OpenAPI: a bare 200, plus 401 and 403 with the `ProblemDetail` schema, the same set as FR-08 (ADR-008). No parameters.
+
+### Tests
+Step 8a, against the real Postgres with a rollback per test, as `AgentCustomerControllerTest`. Committed users (demo accounts) may exist, so assertions look only at the users the test created:
+- the caller is listed; another agent is listed; a customer is not listed;
+- each item has exactly the fields `id` and `name`;
+- own items are in name order: names share a prefix and differ in one uppercase ASCII letter, so the expected order is the same in any collation; they are created in reverse name order, so id order differs from name order;
+- two agents with the same name are in ascending id order;
+- no token → 401; a customer token → 403;
+- `OpenApiIntegrationTest`: a row for FR-13 (`get /api/agent/agents`, tag "Agents", 200, `401` and `403`, secured, no parameters).
+
+Mutations, each killed by the test named above: the role condition removed (the customer appears); `u.id` ascending changed to descending (same-name agents swap; removing the secondary order is not a usable mutation, because ties would most likely still come back in insertion order); `u.name` changed to `u.id` (name order breaks); `email` added to `AgentRef` (exact fields).
+
+### Consequences
+- Two agents with the same name look the same in the selector and the filter. Demo accounts have unique names; showing the email would need a requirement change.
+- The order depends on the database collation, so tests never compare the whole response with an order computed in Java.
+- An agent created after the client loaded the list does not appear until it is loaded again; when the client loads it is decided in steps 8b and 8d.
+
+### Alternatives considered
+- Collecting agents from the `assignee` fields of queue responses: no backend change, but misses agents without tickets and changes with the filter.
+- Only "Assign to me" and the filters All / Unassigned / Mine: narrows FR-12 and BR-10.
+- A generic `GET /api/agent/users?role=AGENT`: a wider API surface (other roles, more filters) for one use.
+- The endpoint in `ticket/` next to FR-08: it reads no tickets.
+- Including the email in each item: more personal data in every response for a case the demo data does not have.
