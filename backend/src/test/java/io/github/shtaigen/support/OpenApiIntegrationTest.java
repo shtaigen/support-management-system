@@ -64,7 +64,8 @@ class OpenApiIntegrationTest {
             new Op("FR-11", "put", "/api/agent/tickets/{id}/status", AGENT, "200",
                     Set.of("400", "401", "403", "404", "409"), true, Set.of("id")),
             new Op("FR-12", "put", "/api/agent/tickets/{id}/assignee", AGENT, "200",
-                    Set.of("400", "401", "403", "404", "409"), true, Set.of("id")));
+                    Set.of("400", "401", "403", "404", "409"), true, Set.of("id")),
+            new Op("FR-13", "get", "/api/agent/agents", "Agents", "200", Set.of("401", "403"), true, Set.of()));
 
     private static final Set<String> HTTP_METHODS = Set.of("get", "put", "post", "delete", "options", "head",
             "patch", "trace");
