@@ -367,8 +367,9 @@ Vitest with `provideHttpClientTesting` and `HttpTestingController`, `MemoryStora
 
 ## ADR-016: Agent zone
 
-**Status:** Planned
+**Status:** Accepted for §1 (step 8a); the frontend sections are Planned
 **Date:** 2026-11-03
+**Amended:** 2026-11-04 (results of step 8a)
 
 ### Context
 The agent zone covers FR-07..FR-13 on top of the authentication from ADR-014; today `/staff` holds only a placeholder page with "Log out". The backend for FR-07..FR-12 is in place:
@@ -396,8 +397,8 @@ The frontend decisions for 8b..8d are added to this ADR before each step, as wit
 - `GET /api/agent/agents` in the `user/` package: the list reads users only, not the `Ticket` aggregate (ADR-008). FR-08 stays in `ticket/` because it aggregates tickets.
 - `user/AgentController` (`@Tag(name = "Agents")`, `@Operation(summary = "FR-13: List agents")`) calls a `@Transactional(readOnly = true)` method of a `user/AgentService`; controllers do not call repositories, as in FR-08.
 - Response: a JSON array of `user/AgentRef(long id, String name)`. No email: agents choose each other by name, and the field is not needed by FR-07 or FR-12. No wrapper object and no pagination (out of scope for the MVP).
-- One JPQL constructor expression in `UserRepository`: `select new ...AgentRef(u.id, u.name) from User u where u.role = AGENT order by u.name, u.id`. Only these two columns are read, so no entity and no password hash is loaded. The role is checked in the query, because the database does not check the assignee's role (section 5 of the requirements).
-- Order (NFR-05): `name` ascending in the database collation, then `id` ascending. The collation decides how case, spaces and punctuation compare; the client shows the list in server order and does not sort it again.
+- One JPQL constructor expression in `UserRepository.findAgents()`: `select new ...AgentRef(u.id, u.name) from User u where u.role = AGENT order by u.name, u.id`. Only these two columns are read, so no entity and no password hash is loaded. The role is checked in the query, because the database does not check the assignee's role (section 5 of the requirements).
+- Order (NFR-05): `name` ascending in the database collation, then `id` ascending. The collation decides how case, spaces and punctuation compare; the client shows the list in server order and does not sort it again. The database collation is `en_US.utf8` with the libc provider (checked in step 8a).
 - Security: `/api/agent/**` already requires AGENT (ADR-009); no configuration change. 401 without a token, 403 for a customer.
 - OpenAPI: a bare 200, plus 401 and 403 with the `ProblemDetail` schema, the same set as FR-08 (ADR-008). No parameters.
 
@@ -412,9 +413,12 @@ Step 8a, against the real Postgres with a rollback per test, as `AgentCustomerCo
 
 Mutations, each killed by the test named above: the role condition removed (the customer appears); `u.id` ascending changed to descending (same-name agents swap); `u.name` changed to `u.id` (name order breaks); `email` added to `AgentRef` (exact fields). The secondary order `u.id` removed is run three times: Postgres does not guarantee the order of tied rows, but it can return them in id order by accident. If it survives every run, that is recorded as a finding, not covered by a test that passes either way.
 
+Result of step 8a: mutations 1–4 were each killed by their own test only. The removed `u.id` survived three of three runs: Postgres returned the six tied agents in id order. Why it keeps that order was not investigated. No test was added.
+
 ### Consequences
 - Two agents with the same name look the same in the selector and the filter. Demo accounts have unique names; showing the email would need a requirement change.
 - The order depends on the database collation, so tests never compare the whole response with an order computed in Java.
+- The tie-break by id is required by NFR-05 but not guarded by a test: removing it changes nothing observable on today's database (step 8a). It stays in the query.
 - An agent created after the client loaded the list does not appear until it is loaded again; when the client loads it is decided in steps 8b and 8d.
 
 ### Alternatives considered
