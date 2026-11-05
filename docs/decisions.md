@@ -367,9 +367,9 @@ Vitest with `provideHttpClientTesting` and `HttpTestingController`, `MemoryStora
 
 ## ADR-016: Agent zone
 
-**Status:** Accepted for §1 (step 8a); the frontend sections are Planned
+**Status:** Accepted for §1 (step 8a) and §2 (step 8b); the sections for steps 8c and 8d are Planned
 **Date:** 2026-11-03
-**Amended:** 2026-11-04 (results of step 8a)
+**Amended:** 2026-11-04 (results of step 8a); 2026-11-05 (§2 before step 8b)
 
 ### Context
 The agent zone covers FR-07..FR-13 on top of the authentication from ADR-014; today `/staff` holds only a placeholder page with "Log out". The backend for FR-07..FR-12 is in place:
@@ -402,6 +402,61 @@ The frontend decisions for 8b..8d are added to this ADR before each step, as wit
 - Security: `/api/agent/**` already requires AGENT (ADR-009); no configuration change. 401 without a token, 403 for a customer.
 - OpenAPI: a bare 200, plus 401 and 403 with the `ProblemDetail` schema, the same set as FR-08 (ADR-008). No parameters.
 
+
+#### 2. Queue and customer summary (FR-07, FR-08, step 8b)
+Response shapes come from the backend records and `AgentTicketControllerTest`, which checks the exact keys of every queue item, including an unassigned one:
+
+    AgentTicketSummary:   id, subject, category, referenceNumber (string | null), status,
+                          customer { id, name, email }, assignee ({ id, name } | null), lastMessageAt
+    AgentCustomerSummary: id, name, email, ticketCount, activeTicketCount, lastMessageAt
+    AgentRef:             id, name
+
+`assignee` is always present and is `null` for an unassigned ticket; there is no global `NON_NULL` inclusion. The manual check of step 8b compares one live response with these shapes.
+
+Routes and shell:
+- Under the lazy `/staff` tree (ADR-011): `''` → ticket queue (FR-07), `customers` → customer summary (FR-08), `customers/:customerId` → that customer's tickets. `ROLE_HOME` stays `/staff`.
+- A parent `StaffShell` wraps the pages and holds the zone navigation: "Queue" (`/staff`), "Customers" (`/staff/customers`), the user's name and "Log out" (FR-02). It replaces the placeholder `TicketQueue` page; the pages have no logout button.
+- One `TicketQueue` component serves `''` and `customers/:customerId`. It reads `customerId` once from the route snapshot. The UI has no link from one customer's tickets to another's, so Angular never reuses the component for a different customer (ADR-015 §3); a future link of that kind must read `paramMap`.
+- `:customerId` stays a string and is never converted to a number (ADR-015 §3): it goes into `HttpParams` as it is, and the backend validates it.
+
+Shared ticket types:
+- `TicketStatus`, `TicketCategory`, `STATUS_LABELS` and `CATEGORY_LABELS` move from `features/client` to `shared/ticket/` (`ticket.ts`, `ticket-labels.ts`), with no copy left in either zone. `features/client/ticket-labels.ts` is deleted; `customer-ticket.ts` re-exports the two types, so the customer zone changes only imports and its specs stay unchanged.
+- Code used by both lazy zones belongs in a lazy chunk shared by them, not in the initial bundle. The build checks it (Tests, step 8b).
+
+API service and types:
+- `features/staff/agent-api.ts`: `providedIn: 'root'`, methods `tickets(filter)`, `customers()`, `agents()`, each returning an `Observable` from `HttpClient` with a relative `/api/agent/...` URL. Steps 8c and 8d add their methods here.
+- Types are written by hand in `features/staff/agent-ticket.ts`: `AgentTicketSummary`, `AgentCustomerSummary`, `AgentRef`, and the request filter `AgentTicketFilter { statuses: TicketStatus[]; assigneeId?: number; unassigned?: boolean; customerId?: string }`.
+- `tickets()` builds the parameters: one `status` parameter per value in the given order (the repeated form of FR-04), none for an empty list; `assigneeId` when set; `unassigned=true` only when `unassigned` is true; `customerId` when set. No other parameters.
+
+Filters:
+- Filter values are string keys, never `null`. `mat-select` treats an option with a `null` value as a reset: it is never shown as selected (`@angular/material` v22.2.5, `select.ts` `_selectOptionByValue` and `_onSelect`), and the status filter has two choices that send no `status` value (Active sends three, All none), which one `null` could not tell apart.
+  - status: `'active' | 'all' | TicketStatus`; Active is every status except CLOSED (OPEN, ANSWERED, CUSTOMER_REPLIED), All sends no `status`, a single status sends that value;
+  - assignee: `'anyone' | 'unassigned' | 'agent:<id>'`; Anyone sends nothing, Unassigned sends `unassigned=true`, an agent sends `assigneeId`.
+- One function in `features/staff` turns the two keys and the optional `customerId` into an `AgentTicketFilter`; the component holds only keys.
+- Status: a single-choice `mat-button-toggle-group` in the order Active, All, Open, Answered, Customer replied, Closed. The default is Active in the queue and All on a customer's page: an agent opens a customer to see the history, and an All response that is empty means the customer has no tickets (below). A click on the toggle that is already checked still emits `change` (`button-toggle.ts` `_onButtonClick`), so the handler ignores a key equal to the current one, as in `my-tickets.ts`.
+- Assignee: a `mat-select` labelled "Assignee" with Anyone (default), Unassigned and the agents from FR-13 in server order (NFR-05; the client never sorts). The caller's own entry reads "<name> (you)", by comparing `id` with `AuthService.user().id`. A choice of the option that is already selected emits nothing (`select.ts` `_onSelect` propagates only when the selection changed), so no guard is needed.
+- The agent list is loaded once when the page opens, alongside the first queue request and independently of it. Until it arrives, the select offers Anyone and Unassigned. If it fails, the queue works as usual, the select keeps those two options, and the note "Cannot load agents" is shown next to it; there is no retry until the page is opened again.
+- Both filters live in signals, not in the URL. Each change sends one request with both current values; a pending queue request is cancelled (`switchMap`), so only the response for the current filters is shown. "Retry" repeats the request for the current filters. The queue is not polled (NFR-06 covers only threads).
+
+Queue table:
+- `mat-table` with the array as data source; every response is a new array, so the table renders it again. No sorting and no paginator: server order (NFR-05), pagination is out of scope.
+- Columns: Subject, Customer (name, with the email on a second line), Category, Ref. (the reference number, empty when `null`), Status, Assignee (the name, or "Unassigned" when `null`), Last activity. On a customer's page the Customer column is hidden; the customer is in the heading.
+- Rows are not links in step 8b; the link to `/staff/tickets/:id` comes with the thread in step 8c.
+
+Customer's tickets page (`customers/:customerId`):
+- The heading is the customer's name with the email under it, taken from the first row of any applied response and kept from then on, also when a later filtered response is empty. Until it is known the heading is "Customer tickets". A link "All customers" leads back to the summary. A customer from FR-08 always has at least one ticket, so the first response with the default All filter carries the name without an extra request.
+- With both filters at their defaults (All, Anyone), an empty response means the id is not a customer with tickets. A 400, with any filters, means the id is not a valid number: the filters the UI can send are always valid. Both show "No tickets for this customer" with the "All customers" link. A 400 does not offer "Retry", because the same request gets the same answer.
+
+Customer summary (`customers`):
+- `mat-table` with the columns Customer (the name as a link to `customers/:id`), Email, Tickets (`ticketCount`), Active (`activeTicketCount`), Last activity, in server order (NFR-05). The link is in the name cell, not a click handler on the row, so it works with the keyboard and opens in a new tab.
+- Loaded when the page opens; "Retry" on error. No filters.
+
+States and display:
+- Every queue request shows a spinner instead of the table, the empty text or the error; the filters stay enabled, so a new choice cancels the pending request (ADR-015 §8). Spinner labels: "Loading tickets" on both queue pages, "Loading customers" on the summary.
+- Empty texts: the queue with All and Anyone shows "No tickets yet"; a customer's page with All and Anyone shows "No tickets for this customer" (above); any other empty queue response shows "No tickets match these filters"; an empty summary shows "No customers with tickets yet".
+- Any other error shows `toProblem().detail` with "Retry". A 401 has no special case, as in the customer list: the interceptor ends the session (ADR-014).
+- Dates use `DatePipe` with the format `medium` in the browser's time zone, as in the customer zone.
+
 ### Tests
 Step 8a, against the real Postgres with a rollback per test, as `AgentCustomerControllerTest`. Committed users (demo accounts) may exist, so assertions look only at the users the test created:
 - the caller is listed; another agent is listed; a customer is not listed;
@@ -415,11 +470,41 @@ Mutations, each killed by the test named above: the role condition removed (the 
 
 Result of step 8a: mutations 1–4 were each killed by their own test only. The removed `u.id` survived three of three runs: Postgres returned the six tied agents in id order. Why it keeps that order was not investigated. No test was added.
 
+Step 8b: Vitest with `provideHttpClientTesting` and `HttpTestingController`, `MemoryStorage` per TestBed (ADR-015). Query parameters are checked on `request.urlWithParams`, so their order and repetition are visible. Required cases:
+- API service: each method calls the right URL; the Active filter sends `status=OPEN&status=ANSWERED&status=CUSTOMER_REPLIED`; an empty status list sends no `status`; `unassigned=false` or absent sends no `unassigned`; `customerId` `'9007199254740993'` is sent unchanged (a conversion to a number would send `...992`).
+- Filter function: every status key and every assignee key gives the documented filter; `customerId` is passed through.
+- Queue: the first request uses Active and Anyone; choosing All sends no `status`; a click on the checked toggle sends nothing; changing a filter while a request is pending cancels it (`TestRequest.cancelled`) and shows only the new response; Retry repeats the current filters; the spinner is labelled "Loading tickets"; a `null` assignee shows "Unassigned" and a `null` reference number an empty cell; rows contain no links.
+- Assignee select, through the real `mat-select` (opened with a click, options read from the overlay): the options are Anyone, Unassigned and the agents in server order; the caller's entry has "(you)" and no other one does; Unassigned sends `unassigned=true`; an agent sends `assigneeId=<id>`; choosing the selected option again sends nothing (this pins library behavior; there is no line of ours to mutate); an agent list error shows "Cannot load agents" and only the two fixed options, and the queue still loads.
+- Customer's tickets: the request carries `customerId` from the route as a string; the first request sends no `status`; the heading shows the name and email from the response; it keeps them after a filtered empty response; the Customer column is hidden; an empty response with the default filters and a 400 both show "No tickets for this customer" with the link and no Retry; an empty filtered response shows "No tickets match these filters".
+- Summary: the columns and the server order; the name links to `/staff/customers/<id>`; the spinner is labelled "Loading customers"; the empty text; an error with Retry.
+- Shell: the links "Queue" and "Customers", the user's name, and "Log out" calls `logout()`.
+- Routes: the three paths resolve to their components under `StaffShell`.
+- The customer zone specs pass unchanged after the move to `shared/ticket/`.
+
+Tracers before mutations: a failing `it()` in a staff spec, and a top-level `throw` in every module that is mutated (`agent-api.ts`, the filter function's module, `ticket-queue.ts`). Mutations, each killed by the test named above:
+1. `switchMap` → `mergeMap` in the queue (the cancelled request is not cancelled);
+2. the guard against a click on the checked toggle removed;
+3. CLOSED added to Active, or one active status dropped (exact parameters);
+4. Unassigned mapped to no parameter;
+5. the "(you)" comparison removed or inverted;
+6. the default on a customer's page changed to Active;
+7. `customerId` converted with `Number(...)`;
+8. the heading taken from the latest response instead of kept;
+9. a 400 on a customer's page shown as the generic error with Retry;
+10. an agent list error turned into a queue error.
+
+Build: `npx ng build`. The initial bundle is expected to stay at 506.92 kB, since no initial code changes; `shared/ticket/` and the Material modules used by both zones go into lazy chunks. If the initial size changes, it is measured against a baseline build of the previous commit (`git worktree`, `--stats-json`) before any fix, as in ADR-015.
+
 ### Consequences
 - Two agents with the same name look the same in the selector and the filter. Demo accounts have unique names; showing the email would need a requirement change.
 - The order depends on the database collation, so tests never compare the whole response with an order computed in Java.
 - The tie-break by id is required by NFR-05 but not guarded by a test: removing it changes nothing observable on today's database (step 8a). It stays in the query.
 - An agent created after the client loaded the list does not appear until it is loaded again; when the client loads it is decided in steps 8b and 8d.
+- Step 8b loads the agent list each time a queue page opens, so a new agent appears after the page is opened again. Step 8d decides it for the assignment selector.
+- Filters reset when the page is opened again: Active and Anyone in the queue, All and Anyone on a customer's page. The URL keeps no filter (as ADR-015 §7).
+- With string keys, the select shows the chosen option in its trigger, and Active and All stay distinct. The cost is one mapping function, which is tested on its own.
+- ADR-015 §8 ("labels are defined in one place in the zone") and §2 (types in `features/client/customer-ticket.ts`) now hold for both zones through `shared/ticket/`; `customer-ticket.ts` keeps the customer-only types.
+- A customer whose tickets are all closed still gets the heading on their page, because the default is All. If the agent changes a filter before the first response arrives, the first response may be empty and the heading stays "Customer tickets" until a response with rows is applied.
 
 ### Alternatives considered
 - Collecting agents from the `assignee` fields of queue responses: no backend change, but misses agents without tickets and changes with the filter.
@@ -427,3 +512,9 @@ Result of step 8a: mutations 1–4 were each killed by their own test only. The 
 - A generic `GET /api/agent/users?role=AGENT`: a wider API surface (other roles, more filters) for one use.
 - The endpoint in `ticket/` next to FR-08: it reads no tickets.
 - Including the email in each item: more personal data in every response for a case the demo data does not have.
+- Active as the default on a customer's page too, with a separate unfiltered request for the heading: one more request and two responses that can arrive in either order.
+- The customer's name passed in router state from the summary: lost after a reload or a direct link.
+- `null` for Anyone or All with `canSelectNullableOptions` on the select: works for the select, but the status filter has two choices that send no single status, and `null` cannot tell them apart.
+- `mat-select` for the status filter as well: hides the six choices behind a click, and the queue filter is the one an agent changes most.
+- A click handler on summary rows instead of a link in the name cell: no keyboard focus and no "open in a new tab".
+- Separate components for the queue and a customer's tickets: two copies of the filters, the loading and the states.
