@@ -369,7 +369,7 @@ Vitest with `provideHttpClientTesting` and `HttpTestingController`, `MemoryStora
 
 **Status:** Accepted for §1 (step 8a) and §2 (step 8b); the sections for steps 8c and 8d are Planned
 **Date:** 2026-11-03
-**Amended:** 2026-11-04 (results of step 8a); 2026-11-05 (§2 before step 8b)
+**Amended:** 2026-11-04 (results of step 8a); 2026-11-05 (§2 before step 8b; plan review of step 8b)
 
 ### Context
 The agent zone covers FR-07..FR-13 on top of the authentication from ADR-014; today `/staff` holds only a placeholder page with "Log out". The backend for FR-07..FR-12 is in place:
@@ -415,7 +415,8 @@ Response shapes come from the backend records and `AgentTicketControllerTest`, w
 
 Routes and shell:
 - Under the lazy `/staff` tree (ADR-011): `''` → ticket queue (FR-07), `customers` → customer summary (FR-08), `customers/:customerId` → that customer's tickets. `ROLE_HOME` stays `/staff`.
-- A parent `StaffShell` wraps the pages and holds the zone navigation: "Queue" (`/staff`), "Customers" (`/staff/customers`), the user's name and "Log out" (FR-02). It replaces the placeholder `TicketQueue` page; the pages have no logout button.
+- A parent `StaffShell` wraps the pages and holds the zone navigation: "Queue" (`/staff`), "Customers" (`/staff/customers`), the user's name and "Log out" (FR-02). Its `nav` has `aria-label="Agent zone"`. It replaces the placeholder `TicketQueue` page; the pages have no logout button.
+- Headings and route titles: the queue "Ticket queue", the summary "Customers" (`customer-summary.ts`, `CustomerSummary`), a customer's page "Customer tickets" as the route title (its heading is described below).
 - One `TicketQueue` component serves `''` and `customers/:customerId`. It reads `customerId` once from the route snapshot. The UI has no link from one customer's tickets to another's, so Angular never reuses the component for a different customer (ADR-015 §3); a future link of that kind must read `paramMap`.
 - `:customerId` stays a string and is never converted to a number (ADR-015 §3): it goes into `HttpParams` as it is, and the backend validates it.
 
@@ -432,7 +433,7 @@ Filters:
 - Filter values are string keys, never `null`. `mat-select` treats an option with a `null` value as a reset: it is never shown as selected (`@angular/material` v22.2.5, `select.ts` `_selectOptionByValue` and `_onSelect`), and the status filter has two choices that send no `status` value (Active sends three, All none), which one `null` could not tell apart.
   - status: `'active' | 'all' | TicketStatus`; Active is every status except CLOSED (OPEN, ANSWERED, CUSTOMER_REPLIED), All sends no `status`, a single status sends that value;
   - assignee: `'anyone' | 'unassigned' | 'agent:<id>'`; Anyone sends nothing, Unassigned sends `unassigned=true`, an agent sends `assigneeId`.
-- One function in `features/staff` turns the two keys and the optional `customerId` into an `AgentTicketFilter`; the component holds only keys.
+- One function, `toTicketFilter(status, assignee, customerId?)` in `features/staff/queue-filter.ts`, turns the two keys and the optional `customerId` into an `AgentTicketFilter`; the component holds only keys.
 - Status: a single-choice `mat-button-toggle-group` in the order Active, All, Open, Answered, Customer replied, Closed. The default is Active in the queue and All on a customer's page: an agent opens a customer to see the history, and an All response that is empty means the customer has no tickets (below). A click on the toggle that is already checked still emits `change` (`button-toggle.ts` `_onButtonClick`), so the handler ignores a key equal to the current one, as in `my-tickets.ts`.
 - Assignee: a `mat-select` labelled "Assignee" with Anyone (default), Unassigned and the agents from FR-13 in server order (NFR-05; the client never sorts). The caller's own entry reads "<name> (you)", by comparing `id` with `AuthService.user().id`. A choice of the option that is already selected emits nothing (`select.ts` `_onSelect` propagates only when the selection changed), so no guard is needed.
 - The agent list is loaded once when the page opens, alongside the first queue request and independently of it. Until it arrives, the select offers Anyone and Unassigned. If it fails, the queue works as usual, the select keeps those two options, and the note "Cannot load agents" is shown next to it; there is no retry until the page is opened again.
@@ -445,7 +446,7 @@ Queue table:
 
 Customer's tickets page (`customers/:customerId`):
 - The heading is the customer's name with the email under it, taken from the first row of any applied response and kept from then on, also when a later filtered response is empty. Until it is known the heading is "Customer tickets". A link "All customers" leads back to the summary. A customer from FR-08 always has at least one ticket, so the first response with the default All filter carries the name without an extra request.
-- With both filters at their defaults (All, Anyone), an empty response means the id is not a customer with tickets. A 400, with any filters, means the id is not a valid number: the filters the UI can send are always valid. Both show "No tickets for this customer" with the "All customers" link. A 400 does not offer "Retry", because the same request gets the same answer.
+- With both filters at their defaults (All, Anyone), an empty response means the id is not a customer with tickets. A 400, with any filters, means the id is not a valid number: the filters the UI can send are always valid. Both show "No tickets for this customer"; the "All customers" link of the heading stays, and the message has no second link. A 400 does not offer "Retry", because the same request gets the same answer.
 
 Customer summary (`customers`):
 - `mat-table` with the columns Customer (the name as a link to `customers/:id`), Email, Tickets (`ticketCount`), Active (`activeTicketCount`), Last activity, in server order (NFR-05). The link is in the name cell, not a click handler on the row, so it works with the keyboard and opens in a new tab.
@@ -475,20 +476,20 @@ Step 8b: Vitest with `provideHttpClientTesting` and `HttpTestingController`, `Me
 - Filter function: every status key and every assignee key gives the documented filter; `customerId` is passed through.
 - Queue: the first request uses Active and Anyone; choosing All sends no `status`; a click on the checked toggle sends nothing; changing a filter while a request is pending cancels it (`TestRequest.cancelled`) and shows only the new response; Retry repeats the current filters; the spinner is labelled "Loading tickets"; a `null` assignee shows "Unassigned" and a `null` reference number an empty cell; rows contain no links.
 - Assignee select, through the real `mat-select` (opened with a click, options read from the overlay): the options are Anyone, Unassigned and the agents in server order; the caller's entry has "(you)" and no other one does; Unassigned sends `unassigned=true`; an agent sends `assigneeId=<id>`; choosing the selected option again sends nothing (this pins library behavior; there is no line of ours to mutate); an agent list error shows "Cannot load agents" and only the two fixed options, and the queue still loads.
-- Customer's tickets: the request carries `customerId` from the route as a string; the first request sends no `status`; the heading shows the name and email from the response; it keeps them after a filtered empty response; the Customer column is hidden; an empty response with the default filters and a 400 both show "No tickets for this customer" with the link and no Retry; an empty filtered response shows "No tickets match these filters".
+- Customer's tickets: on the route `/staff/customers/9007199254740993` the request carries `customerId=9007199254740993` (a conversion to a number would send `...992`); the first request sends no `status`; the heading shows the name and email from the response; it keeps them after a filtered empty response; the Customer column is hidden; an empty response with the default filters and a 400 both show "No tickets for this customer", the heading link to `/staff/customers` and no Retry; an empty filtered response shows "No tickets match these filters".
 - Summary: the columns and the server order; the name links to `/staff/customers/<id>`; the spinner is labelled "Loading customers"; the empty text; an error with Retry.
 - Shell: the links "Queue" and "Customers", the user's name, and "Log out" calls `logout()`.
 - Routes: the three paths resolve to their components under `StaffShell`.
 - The customer zone specs pass unchanged after the move to `shared/ticket/`.
 
-Tracers before mutations: a failing `it()` in a staff spec, and a top-level `throw` in every module that is mutated (`agent-api.ts`, the filter function's module, `ticket-queue.ts`). Mutations, each killed by the test named above:
+Tracers before mutations: a failing `it()` in a staff spec, and a top-level `throw` in every module that is mutated (`agent-api.ts`, the filter function's module, `ticket-queue.ts`). Every mutation type-checks (for example `String(Number(id))`), so it fails by behavior and not by a compile error. Mutations, each killed by the test named above:
 1. `switchMap` → `mergeMap` in the queue (the cancelled request is not cancelled);
 2. the guard against a click on the checked toggle removed;
-3. CLOSED added to Active, or one active status dropped (exact parameters);
+3. a: CLOSED added to Active; b: ANSWERED dropped from Active (exact parameters);
 4. Unassigned mapped to no parameter;
-5. the "(you)" comparison removed or inverted;
+5. a: the "(you)" condition removed, so the mark is never shown; b: the comparison inverted;
 6. the default on a customer's page changed to Active;
-7. `customerId` converted with `Number(...)`;
+7. `customerId` converted with `Number(...)`: a in `agent-api.ts` (killed by the API test with the large id), b where `ticket-queue.ts` reads the route parameter (killed by the customer's page test with the large id; a small id would let it survive);
 8. the heading taken from the latest response instead of kept;
 9. a 400 on a customer's page shown as the generic error with Retry;
 10. an agent list error turned into a queue error.
