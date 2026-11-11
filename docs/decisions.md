@@ -369,7 +369,7 @@ Vitest with `provideHttpClientTesting` and `HttpTestingController`, `MemoryStora
 
 **Status:** Accepted for §1 (step 8a) and §2 (step 8b); the sections for steps 8c and 8d are Planned
 **Date:** 2026-11-03
-**Amended:** 2026-11-04 (results of step 8a); 2026-11-05 (§2 before step 8b; plan review of step 8b)
+**Amended:** 2026-11-04 (results of step 8a); 2026-11-05 (§2 before step 8b; plan review of step 8b); 2026-11-11 (results of step 8b)
 
 ### Context
 The agent zone covers FR-07..FR-13 on top of the authentication from ADR-014; today `/staff` holds only a placeholder page with "Log out". The backend for FR-07..FR-12 is in place:
@@ -494,7 +494,14 @@ Tracers before mutations: a failing `it()` in a staff spec, and a top-level `thr
 9. a 400 on a customer's page shown as the generic error with Retry;
 10. an agent list error turned into a queue error.
 
-Build: `npx ng build`. The initial bundle is expected to stay at 506.92 kB, since no initial code changes; `shared/ticket/` and the Material modules used by both zones go into lazy chunks. If the initial size changes, it is measured against a baseline build of the previous commit (`git worktree`, `--stats-json`) before any fix, as in ADR-015.
+Build: `npx ng build`. The initial bundle was expected to stay at 506.92 kB, since no initial code changes; this expectation was written without a build and was wrong (see the result below). `shared/ticket/` and the Material modules used by both zones go into lazy chunks. If the initial size changes, it is measured against a baseline build of the previous commit (`git worktree`, `--stats-json`) before any fix, as in ADR-015.
+
+Result of step 8b:
+- Tests: 219 in 22 files, 52 of them new; the customer zone specs are unchanged. The tracers (a failing `it()`, and a top-level throw in `agent-api.ts`, `queue-filter.ts` and `ticket-queue.ts`) each failed the run.
+- Mutations: 13 runs (1, 2, 3a, 3b, 4, 5a, 5b, 6, 7a, 7b, 8, 9, 10), all killed by their named tests, none survived. Extra failures had the same cause: in 3a and 3b, the select tests whose exact URLs begin with the Active parameters; in 5b, two tests whose helper finds an option by its text; in 6, the empty-with-defaults text. Mutation 9 was first killed only by a `TypeError` on the missing message, so the test did not observe the generic error; the test now checks first that there is no alert and no Retry, and the rerun failed on the alert assertion.
+- Build: the initial total grew from 506.92 kB to 517.49 kB. No file of `src/app` is in the initial bundle. Measured like for like (both builds without the chunk optimization pass, below): +10,553 bytes of JavaScript, of which 11 rxjs modules new to the initial bundle (+3,468, the `asap` and `animationFrame` schedulers, `ConnectableObservable`, `refCount` and their helpers), growth inside modules already there (+7,663, of it `@angular/core/fesm2022/core.mjs` +7,036), and glue −578. Which exports the lazy zones pull into those modules was not attributed.
+- The chunk optimization pass: `@angular/build` v22.2.5 runs a Rolldown pass over optimized scripts when esbuild produces at least three lazy JavaScript chunks (`src/utils/environment-options.ts:190-203`, default threshold 3, `NG_BUILD_OPTIMIZE_CHUNKS=false` turns it off; `src/builders/application/execute-build.ts:246-258`). Step 8b adds the third lazy chunk (the one shared by both zones), so the pass now runs by default: it merges the initial chunks into one `main` file, and the per-module sizes in its metafile cannot be compared with a build without the pass. The total barely changes: 517.49 kB with the pass, 517.47 kB without it.
+- Manual checks: live responses of `/api/agent/tickets`, `/api/agent/customers` and `/api/agent/agents` match the types (`assignee` present and `null` for an unassigned ticket); the queue filters, the summary and a customer's page, including a reload, an unknown id and a non-numeric id, behaved as decided. The error paths (agent list failure, queue error with Retry) were not checked by hand; they are covered by tests only.
 
 ### Consequences
 - Two agents with the same name look the same in the selector and the filter. Demo accounts have unique names; showing the email would need a requirement change.
@@ -502,6 +509,8 @@ Build: `npx ng build`. The initial bundle is expected to stay at 506.92 kB, sinc
 - The tie-break by id is required by NFR-05 but not guarded by a test: removing it changes nothing observable on today's database (step 8a). It stays in the query.
 - An agent created after the client loaded the list does not appear until it is loaded again; when the client loads it is decided in steps 8b and 8d.
 - Step 8b loads the agent list each time a queue page opens, so a new agent appears after the page is opened again. Step 8d decides it for the assignment selector.
+- The initial bundle grows when a lazy zone uses more of a library that the initial code already imports (step 8b: +10.55 kB from `@angular/core` and rxjs, with no application code moved). Accepted: 517.49 kB of the 550 kB warning budget.
+- Bundle comparisons from step 8b on build both sides with the same `NG_BUILD_OPTIMIZE_CHUNKS` setting, `false` for a comparison per module; the setting is passed only to the measuring command, never written into the configuration.
 - Filters reset when the page is opened again: Active and Anyone in the queue, All and Anyone on a customer's page. The URL keeps no filter (as ADR-015 §7).
 - With string keys, the select shows the chosen option in its trigger, and Active and All stay distinct. The cost is one mapping function, which is tested on its own.
 - ADR-015 §8 ("labels are defined in one place in the zone") and §2 (types in `features/client/customer-ticket.ts`) now hold for both zones through `shared/ticket/`; `customer-ticket.ts` keeps the customer-only types.
