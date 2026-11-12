@@ -69,6 +69,36 @@ describe('AgentApi', () => {
     );
   });
 
+  // A conversion to a number would send ...992.
+  it('gets a ticket by an id beyond Number.MAX_SAFE_INTEGER unchanged', () => {
+    api.ticket('9007199254740993').subscribe();
+    httpTesting
+      .expectOne({ method: 'GET', url: '/api/agent/tickets/9007199254740993' })
+      .flush(null);
+  });
+
+  it('posts exactly { body } to an id beyond Number.MAX_SAFE_INTEGER unchanged', () => {
+    api.postMessage('9007199254740993', '  Hi  ').subscribe();
+    const req = httpTesting.expectOne({
+      method: 'POST',
+      url: '/api/agent/tickets/9007199254740993/messages',
+    });
+    expect(req.request.body).toStrictEqual({ body: '  Hi  ' });
+    req.flush(null);
+  });
+
+  it('encodes a URL-unsafe ticket id', () => {
+    api.ticket('a/b?c').subscribe();
+    httpTesting.expectOne({ method: 'GET', url: '/api/agent/tickets/a%2Fb%3Fc' }).flush(null);
+  });
+
+  it('encodes a URL-unsafe ticket id when posting', () => {
+    api.postMessage('a/b?c', 'Hi').subscribe();
+    httpTesting
+      .expectOne({ method: 'POST', url: '/api/agent/tickets/a%2Fb%3Fc/messages' })
+      .flush(null);
+  });
+
   it('lists customers', () => {
     api.customers().subscribe();
     httpTesting.expectOne({ method: 'GET', url: AGENT_CUSTOMERS_URL }).flush([]);

@@ -134,11 +134,14 @@ const COLUMNS = [
     } @else if (current.tickets.length === 0) {
       <p class="empty">{{ emptyText() }}</p>
     } @else {
-      <!-- Server order (NFR-05); rows are not links until the thread exists (step 8c). -->
+      <!-- Server order (NFR-05); the client never sorts. -->
       <table mat-table [dataSource]="current.tickets">
         <ng-container matColumnDef="subject">
           <th mat-header-cell *matHeaderCellDef>Subject</th>
-          <td mat-cell *matCellDef="let ticket">{{ ticket.subject }}</td>
+          <!-- A link, not a row click handler: keyboard and "open in a new tab" work. -->
+          <td mat-cell *matCellDef="let ticket">
+            <a [routerLink]="['/staff/tickets', ticket.id]">{{ ticket.subject }}</a>
+          </td>
         </ng-container>
         <ng-container matColumnDef="customer">
           <th mat-header-cell *matHeaderCellDef>Customer</th>

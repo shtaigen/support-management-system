@@ -143,6 +143,11 @@ describe('TicketQueue', () => {
     return row.querySelector(`.mat-column-${column}`)!.textContent!.trim();
   }
 
+  // Null when the subject cell has no link.
+  function subjectHref(row: HTMLElement): string | null {
+    return row.querySelector('.mat-column-subject a')?.getAttribute('href') ?? null;
+  }
+
   function headers(): string[] {
     return [...root().querySelectorAll('th.mat-mdc-header-cell')].map((th) => th.textContent!.trim());
   }
@@ -208,12 +213,15 @@ describe('TicketQueue', () => {
       expect(cell(row, 'referenceNumber')).toBe('');
     });
 
-    it('renders rows without links', async () => {
+    it('links each subject, and only the subject, to the ticket thread', async () => {
       await open();
       await flush(expectTickets(), [PRINTER, CLAIM]);
 
-      expect(rows().length).toBe(2);
-      expect(root().querySelectorAll('table a').length).toBe(0);
+      expect(rows().map(subjectHref)).toEqual(['/staff/tickets/42', '/staff/tickets/7']);
+      expect(rows().map((row) => row.querySelectorAll('a').length)).toEqual([1, 1]);
+      expect(rows()[0].querySelector('.mat-column-subject a')?.textContent?.trim()).toBe(
+        'Printer broken',
+      );
     });
 
     it('sends no status parameter for All', async () => {
@@ -409,6 +417,14 @@ describe('TicketQueue', () => {
       expect(rows().length).toBe(1);
       expect(headers()).not.toContain('Customer');
       expect(root().querySelector('.mat-column-customer')).toBeNull();
+    });
+
+    it('links the subject to the ticket thread', async () => {
+      await open('/staff/customers/100');
+      await flush(expectTickets(), [PRINTER]);
+
+      // The ticket id, not the customer id from the route or the row.
+      expect(rows().map(subjectHref)).toEqual(['/staff/tickets/42']);
     });
 
     it('shows "No tickets for this customer" for an empty response with the default filters', async () => {

@@ -6,6 +6,7 @@ import { RouterTestingHarness } from '@angular/router/testing';
 import { MemoryStorage } from '../../core/auth/memory-storage';
 import { SESSION_STORAGE } from '../../core/auth/session';
 import { AGENTS_URL, AGENT_CUSTOMERS_URL, AGENT_TICKETS_URL } from './agent-api';
+import { AgentTicketThread } from './agent-ticket-thread';
 import { CustomerSummary } from './customer-summary';
 import { StaffShell } from './staff-shell';
 import { TicketQueue } from './ticket-queue';
@@ -70,5 +71,18 @@ describe('staff routes', () => {
     expect(components()).toEqual([StaffShell, TicketQueue]);
     expect(routeChain().at(-1)!.paramMap.get('customerId')).toBe('42');
     answerQueue();
+  });
+
+  it('resolves /staff/tickets/42 to AgentTicketThread under StaffShell with the id as a string', async () => {
+    await harness.navigateByUrl('/staff/tickets/42');
+    expect(components()).toEqual([StaffShell, AgentTicketThread]);
+    expect(routeChain().at(-1)!.paramMap.get('id')).toBe('42');
+    // 404 shows "Ticket not found", so polling never starts in this test.
+    httpTesting
+      .expectOne({ method: 'GET', url: `${AGENT_TICKETS_URL}/42` })
+      .flush(
+        { status: 404, title: 'Not Found', detail: 'Ticket not found.' },
+        { status: 404, statusText: 'Not Found' },
+      );
   });
 });
