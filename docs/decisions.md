@@ -369,7 +369,7 @@ Vitest with `provideHttpClientTesting` and `HttpTestingController`, `MemoryStora
 
 **Status:** Accepted for §1 (step 8a) and §2 (step 8b); the sections for steps 8c and 8d are Planned
 **Date:** 2026-11-03
-**Amended:** 2026-11-04 (results of step 8a); 2026-11-05 (§2 before step 8b; plan review of step 8b); 2026-11-11 (results of step 8b)
+**Amended:** 2026-11-04 (results of step 8a); 2026-11-05 (§2 before step 8b; plan review of step 8b); 2026-11-11 (results of step 8b); 2026-11-12 (§3 before step 8c)
 
 ### Context
 The agent zone covers FR-07..FR-13 on top of the authentication from ADR-014; today `/staff` holds only a placeholder page with "Log out". The backend for FR-07..FR-12 is in place:
@@ -389,7 +389,7 @@ The work is split into steps, one concern each:
 - 8c: ticket detail, thread, reply and polling (FR-09, FR-10);
 - 8d: status change and assignment with `version` and 409 handling (FR-11, FR-12).
 
-The frontend decisions for 8b..8d are added to this ADR before each step, as with ADR-015. Whether the agent thread shares the polling code of `features/client/ticket-thread-store.ts` or has its own store is decided before 8c.
+The frontend decisions for 8b..8d are added to this ADR before each step, as with ADR-015. Whether the agent thread shares the polling code of `features/client/ticket-thread-store.ts` or has its own store is decided in §3: it has its own store.
 
 ### Decision
 
@@ -458,6 +458,57 @@ States and display:
 - Any other error shows `toProblem().detail` with "Retry". A 401 has no special case, as in the customer list: the interceptor ends the session (ADR-014).
 - Dates use `DatePipe` with the format `medium` in the browser's time zone, as in the customer zone.
 
+#### 3. Ticket thread, reply and polling (FR-09, FR-10, step 8c)
+Response shapes come from the backend record `AgentTicketResponse` and a live check before step 8c (`GET`, `POST .../messages`, `GET` on one ticket):
+
+    AgentTicketResponse: id, subject, category, referenceNumber (string | null), status,
+                         customer { id, name, email }, assignee ({ id, name } | null),
+                         createdAt, updatedAt, lastMessageAt, version,
+                         messages [{ id, body, createdAt, author { name, role } }]
+    POST /api/agent/tickets/{id}/messages  body { body }  200, AgentTicketResponse
+
+A message author has a name and a role but no id. In the live check the post returned the new status ANSWERED, the new message last and the version raised by one, and the next `GET` returned the same body.
+
+Routes:
+- `tickets/:id` under `StaffShell` → `AgentTicketThread` (`features/staff/agent-ticket-thread.ts`), route title "Ticket".
+- `:id` stays a string and goes into the URL with `encodeURIComponent` (ADR-015 §3). The page reads it once from the route snapshot. The only way out of a thread to another ticket goes through a queue page, which destroys the thread component, so Angular never reuses it for a different id.
+- On both queue pages the subject cell becomes a link to `/staff/tickets/<id>`. The link is in the cell, not a click handler on the row, as in the summary (§2). Ids come from JSON numbers (ADR-015, Consequences). The step 8b case "rows contain no links" is replaced by this.
+
+API service and types:
+- `AgentApi` gets `ticket(id: string)` (`GET /api/agent/tickets/{id}`) and `postMessage(id: string, body: string)` (`POST .../messages` with `{ body }`).
+- `features/staff/agent-ticket.ts` gets `AgentTicketResponse` and `AgentTicketMessage`, written by hand from the shapes above. `assignee` is `{ id, name } | null`; `author` is `{ name: string; role: UserRole }`.
+
+Store:
+- `features/staff/agent-thread-store.ts`, `AgentThreadStore`: the agent zone's own copy of `TicketThreadStore`, adapted to `AgentApi` and `AgentTicketResponse`, provided by the page. `features/client/ticket-thread-store.ts` and its spec do not change.
+- It follows ADR-015 §4 without exceptions: polling every 4 seconds after the first successful load, one timer, at most one poll in flight, tab visibility through `inject(DOCUMENT)`, stop on destroy, sequence numbers for every thread request, a stale 401 still stops polling, 400 and 404 show "Ticket not found", any other error after the first success shows the note "Cannot refresh the conversation". The poll interval is a constant of the agent zone with the same value (NFR-06).
+- Post errors follow ADR-015 §4 and §6: 401 stops polling; 404 shows "Ticket not found"; 409 reloads the ticket at once as a new numbered request. For an agent a 409 means a CLOSED ticket (BR-06) or a concurrent change (BR-15); both get the same handling. Any other post error belongs to the composer only.
+- `version` is part of the applied ticket and is not used in step 8c. Step 8d adds the status and assignee actions to this store, so that their responses also go through the sequence numbers.
+- Own copy, not a shared core: step 8d adds actions that only the agent has, and the customer store is finished and tested. The cost is two copies of the polling rules (Consequences).
+
+Java whitespace:
+- `features/client/java-whitespace.ts` and its spec move to `shared/text/` unchanged, with no copy left in either zone, as the shared ticket types in §2. The customer zone changes only the imports in `ticket-thread.ts` and `new-ticket.ts`; its specs pass unchanged. The rules mirror the backend, so both zones must use the same code.
+- The agent composer has its own small not-blank validator on top of `isJavaBlank`, as each customer page has (the backlog item to merge them stays).
+
+Header:
+- The subject as the heading; status, category, "Ref. ..." only when the reference number is not null, and the creation date (ADR-015 §6).
+- The customer: the name as a link to `/staff/customers/<customer.id>`, with the email next to it.
+- The assignee: "Assigned to <name>", with " (you)" when `assignee.id` equals `AuthService.user().id` (as in the §2 selector), or "Unassigned" when `null`.
+- Everything is rendered from the applied ticket, so the status and the assignee change as soon as a response is applied, for example after the first reply to an unassigned ticket (TR-02, BR-09).
+
+Messages:
+- Server order (NFR-05). Each message shows "<author name> · <role label>" (Customer or Agent) and its date. Customer and agent messages are visually distinct by `author.role`.
+- No "You" mark: the author has no id, and comparing names would mark another agent's message when two agents share a name (§2, Consequences). An author id in the response is in the backlog.
+- Bodies are rendered with interpolation and `white-space: pre-wrap`, never `innerHTML`.
+
+Composer (FR-10):
+- The rules of ADR-015 §6: `body` required, not blank by Java's rules, at most 4000 characters counted as typed; sent only with the button; no `maxlength` attribute; the hint "n / 4000"; invalid input never shown as an error; double submit ignored while a post is pending; the outcome follows the post's own response, also when it is stale (success clears the text; 401 keeps it and shows nothing; any other error keeps it and shows `toProblem().detail` under the composer until the user edits the text or sends again). No optimistic message.
+- On a CLOSED ticket the field stays editable, "Send" is disabled, and the hint reads "This ticket is closed. Reopen it to reply." So text typed while a poll brings CLOSED is kept. The reopen action comes in step 8d.
+- A post that races a close (the ticket closed after the last applied response) gets 409: the text stays, the detail is shown, and the ticket is reloaded.
+
+States:
+- As in the customer thread (ADR-015 §8): a spinner labelled "Loading conversation" only on the first load; a failed first load other than 400/404/401 shows the detail with "Retry"; "Ticket not found" with the link "Back to the queue" (`/staff`); the composer appears after the first successful load.
+- Dates use `DatePipe` with the format `medium`.
+
 ### Tests
 Step 8a, against the real Postgres with a rollback per test, as `AgentCustomerControllerTest`. Committed users (demo accounts) may exist, so assertions look only at the users the test created:
 - the caller is listed; another agent is listed; a customer is not listed;
@@ -503,6 +554,31 @@ Result of step 8b:
 - The chunk optimization pass: `@angular/build` v22.2.5 runs a Rolldown pass over optimized scripts when esbuild produces at least three lazy JavaScript chunks (`src/utils/environment-options.ts:190-203`, default threshold 3, `NG_BUILD_OPTIMIZE_CHUNKS=false` turns it off; `src/builders/application/execute-build.ts:246-258`). Step 8b adds the third lazy chunk (the one shared by both zones), so the pass now runs by default: it merges the initial chunks into one `main` file, and the per-module sizes in its metafile cannot be compared with a build without the pass. The total barely changes: 517.49 kB with the pass, 517.47 kB without it.
 - Manual checks: live responses of `/api/agent/tickets`, `/api/agent/customers` and `/api/agent/agents` match the types (`assignee` present and `null` for an unassigned ticket); the queue filters, the summary and a customer's page, including a reload, an unknown id and a non-numeric id, behaved as decided. The error paths (agent list failure, queue error with Retry) were not checked by hand; they are covered by tests only.
 
+Step 8c: Vitest with `provideHttpClientTesting`, `HttpTestingController`, `MemoryStorage` per TestBed, fake timers and a controlled `document` (ADR-015). Required cases:
+- API service: `ticket('9007199254740993')` and `postMessage(...)` call the right URLs with the id unchanged (a conversion to a number would send `...992`); a URL-unsafe id is encoded; the post body is exactly `{ body }`.
+- Store: every polling, sequence, visibility, destroy and error case of the customer store spec (ADR-015, Tests), against `AgentApi`; a post 409 sends a reload.
+- Thread page: the route `/staff/tickets/9007199254740993` requests that id; the header shows the customer name as a link to `/staff/customers/<id>` and the email; "Unassigned" for `null`; "Assigned to <name> (you)" only for the caller; after a successful reply to an unassigned ticket the header shows the new status and assignee; each message shows "<name> · Customer" or "<name> · Agent", and the page has no "You"; "Ref." is not shown for `null`; the spinner is labelled "Loading conversation"; a first-load 5xx shows the detail and "Retry"; "Ticket not found" links to `/staff`.
+- Composer, through the real submit button where form state matters: double submit sends one request (the handler is called directly); an error keeps the text; success clears it, also when the response is stale; a 409 shows the detail, keeps the text and reloads; a post 401 keeps the text and shows nothing; boundary 4000/4001, and 4000 characters plus a trailing space are invalid; a body of only U+00A0 is valid and sent; a body of only U+001C is invalid; the field never enters the error state.
+- CLOSED: "Send" is disabled and the hint is shown only for CLOSED; a poll that brings CLOSED keeps the typed text and disables "Send"; a poll that brings OPEN again enables it.
+- Queue: the subject cell links to `/staff/tickets/<id>` on both queue pages.
+- Routes: `tickets/:id` resolves to `AgentTicketThread` under `StaffShell`.
+- The customer zone specs pass unchanged; the moved `java-whitespace.spec.ts` is unchanged.
+
+Tracers before mutations: a failing `it()` in a staff spec, and a top-level `throw` in every module that is mutated (`agent-api.ts`, `agent-thread-store.ts`, `agent-ticket-thread.ts`, `ticket-queue.ts`). Every mutation type-checks. Mutations, each killed by the test named above:
+1. the sequence check removed in `apply` (a stale poll overwrites the newer thread);
+2. the stale 401 moved inside the sequence check (a stale 401 no longer stops polling);
+3. the hidden-tab check removed from scheduling;
+4. the 409 reload after a post removed;
+5. the post success clears the text only when its response is applied;
+6. the CLOSED condition removed from the disabled state of "Send";
+7. the "(you)" comparison of the assignee inverted;
+8. the ticket id converted with `Number(...)`: a in `agent-api.ts`, b where the page reads the route parameter (both killed only with the large id);
+9. the subject link in the queue built from the customer id instead of the ticket id.
+
+Build: `npx ng build`. No size is predicted. The initial and lazy sizes are reported; if the initial bundle changes, it is measured against a baseline build of the previous commit (`git worktree`, `--stats-json`, both sides with the same `NG_BUILD_OPTIMIZE_CHUNKS`) before it is accepted.
+
+Manual checks after the tests: open a ticket from the queue and from a customer's page; a reply to an unassigned ticket shows ANSWERED and "Assigned to ... (you)"; an agent reply in the agent thread appears in the customer thread within about 4 seconds, and a customer reply in the agent thread likewise; a ticket closed through Swagger disables "Send" after the next poll and keeps the text; a reload of the page; an unknown id and a non-numeric id show "Ticket not found".
+
 ### Consequences
 - Two agents with the same name look the same in the selector and the filter. Demo accounts have unique names; showing the email would need a requirement change.
 - The order depends on the database collation, so tests never compare the whole response with an order computed in Java.
@@ -515,6 +591,9 @@ Result of step 8b:
 - With string keys, the select shows the chosen option in its trigger, and Active and All stay distinct. The cost is one mapping function, which is tested on its own.
 - ADR-015 §8 ("labels are defined in one place in the zone") and §2 (types in `features/client/customer-ticket.ts`) now hold for both zones through `shared/ticket/`; `customer-ticket.ts` keeps the customer-only types.
 - A customer whose tickets are all closed still gets the heading on their page, because the default is All. If the agent changes a filter before the first response arrives, the first response may be empty and the heading stays "Customer tickets" until a response with rows is applied.
+- The agent zone has its own copy of the polling rules of ADR-015 §4 (step 8c). A fix in one store must be checked against the other; the two specs cover the same cases.
+- An agent's own messages are not marked in the thread, and two agents with the same name look the same there. An author id in FR-09 would allow a reliable "(you)".
+- Until step 8d an agent cannot reopen a CLOSED ticket from the UI, so the composer stays disabled on it; Swagger covers the gap.
 
 ### Alternatives considered
 - Collecting agents from the `assignee` fields of queue responses: no backend change, but misses agents without tickets and changes with the filter.
@@ -528,3 +607,9 @@ Result of step 8b:
 - `mat-select` for the status filter as well: hides the six choices behind a click, and the queue filter is the one an agent changes most.
 - A click handler on summary rows instead of a link in the name cell: no keyboard focus and no "open in a new tab".
 - Separate components for the queue and a customer's tickets: two copies of the filters, the loading and the states.
+- A shared polling core in `shared/ticket/`, configured with how to load the ticket and with one method for actions that return it: one implementation of the polling rules, but it changes the finished customer store, and step 8d needs actions the customer zone never uses.
+- "(you)" on messages by comparing the author's name with the caller's: marks another agent's message when two agents share a name.
+- Adding `author.id` to the FR-09 response in step 8c: a backend change and a contract change inside a frontend step.
+- Importing `java-whitespace.ts` from `features/client` into the agent zone: one zone depending on another. A copy in the agent zone: two implementations of backend rules that must stay identical.
+- Hiding the composer on a CLOSED ticket: a poll that brings CLOSED would remove the field with the typed text.
+- Leaving "Send" enabled on a CLOSED ticket and relying on the 409: the agent learns about the close only after trying.
