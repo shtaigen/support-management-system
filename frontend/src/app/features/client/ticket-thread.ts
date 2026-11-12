@@ -17,8 +17,8 @@ import { MatProgressSpinner } from '@angular/material/progress-spinner';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { finalize } from 'rxjs';
 import { GENERIC_ERROR_MESSAGE, toProblem } from '../../core/http/problem-detail';
+import { CATEGORY_LABELS, STATUS_LABELS } from '../../shared/ticket/ticket-labels';
 import { isJavaBlank } from './java-whitespace';
-import { CATEGORY_LABELS, STATUS_LABELS } from './ticket-labels';
 import { TicketThreadStore } from './ticket-thread-store';
 
 // BR-11: at most 4000 characters counted as typed (UTF-16 code units, ADR-015 §6).

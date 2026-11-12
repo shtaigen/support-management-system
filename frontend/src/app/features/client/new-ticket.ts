@@ -16,10 +16,10 @@ import { MatOption, MatSelect } from '@angular/material/select';
 import { Router, RouterLink } from '@angular/router';
 import { finalize } from 'rxjs';
 import { GENERIC_ERROR_MESSAGE, toProblem } from '../../core/http/problem-detail';
+import { CATEGORY_LABELS } from '../../shared/ticket/ticket-labels';
 import { CreateTicketRequest, TicketCategory } from './customer-ticket';
 import { CustomerTicketsApi } from './customer-tickets-api';
 import { isJavaBlank, javaStrip } from './java-whitespace';
-import { CATEGORY_LABELS } from './ticket-labels';
 
 // FR-03, BR-11, BR-18. Lengths are UTF-16 code units, as Java's String.length() (ADR-015 §5).
 const SUBJECT_MAX_LENGTH = 200;

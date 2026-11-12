@@ -1,6 +1,6 @@
-import { TicketCategory, TicketStatus } from './customer-ticket';
+import { TicketCategory, TicketStatus } from './ticket';
 
-// The one place for display labels in the customer zone (ADR-015 §8).
+// The one place for display labels in both zones (ADR-015 §8, ADR-016 §2).
 export const STATUS_LABELS: Record<TicketStatus, string> = {
   OPEN: 'Open',
   ANSWERED: 'Answered',

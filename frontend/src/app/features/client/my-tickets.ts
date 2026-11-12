@@ -9,9 +9,9 @@ import { MatProgressSpinner } from '@angular/material/progress-spinner';
 import { RouterLink } from '@angular/router';
 import { Subject, catchError, map, of, switchMap } from 'rxjs';
 import { GENERIC_ERROR_MESSAGE, toProblem } from '../../core/http/problem-detail';
+import { CATEGORY_LABELS, STATUS_LABELS } from '../../shared/ticket/ticket-labels';
 import { CustomerTicketSummary, TicketStatus } from './customer-ticket';
 import { CustomerTicketsApi } from './customer-tickets-api';
-import { CATEGORY_LABELS, STATUS_LABELS } from './ticket-labels';
 
 type ListState =
   | { kind: 'loading' }

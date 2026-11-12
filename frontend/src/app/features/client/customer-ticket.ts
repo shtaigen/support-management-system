@@ -1,8 +1,10 @@
 import { UserRole } from '../../core/auth/user-role';
+import { TicketCategory, TicketStatus } from '../../shared/ticket/ticket';
+
+// Re-exported so the customer zone keeps its imports (ADR-016 §2).
+export type { TicketCategory, TicketStatus };
 
 // Hand-written from the OpenAPI spec and live responses (ADR-015 §2).
-export type TicketStatus = 'OPEN' | 'ANSWERED' | 'CUSTOMER_REPLIED' | 'CLOSED';
-export type TicketCategory = 'GENERAL' | 'POLICY' | 'CLAIM';
 
 export interface CustomerTicketSummary {
   id: number;

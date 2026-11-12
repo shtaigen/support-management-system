@@ -42,6 +42,11 @@ There is no global Angular CLI: use npm scripts or `npx ng ...`, never bare `ng`
   spec, which does not show every constraint.
 - Never convert a ticket id from the URL to a number; pass it through as a string.
 
+## Agent zone
+- The agent zone follows ADR-016 in `docs/decisions.md`. Read it before changing anything in
+  `features/staff/`. If ADR-016 does not decide something, stop and ask.
+- Never convert `customerId` or a ticket id from the URL to a number; pass it through as a string.
+
 ## Styling
 The Angular Material M3 theme (azure primary, blue tertiary) is defined in `src/styles.scss`.
 Use `--mat-sys-*` variables instead of hardcoded colors; change the theme only there.
