@@ -233,7 +233,7 @@ Vitest with `provideHttpClientTesting` and `HttpTestingController`; guards, redi
 
 **Status:** Accepted
 **Date:** 2026-10-26
-**Amended:** 2026-10-28 (thread page details, post errors and Java whitespace before step 7b); 2026-10-29 (composer error state); 2026-11-01 (new ticket form error display before step 7c; bundle budget after step 7c)
+**Amended:** 2026-10-28 (thread page details, post errors and Java whitespace before step 7b); 2026-10-29 (composer error state); 2026-11-01 (new ticket form error display before step 7c; bundle budget after step 7c); 2026-11-12 (location of the Java whitespace helper after ADR-016 §3)
 
 ### Context
 The customer zone covers FR-03..FR-06 on top of the authentication from ADR-014. Response shapes were checked against `/v3/api-docs.yaml` and live responses:
@@ -287,7 +287,7 @@ The OpenAPI spec does not show every constraint: `subject` and `message` appear 
 #### 5. New ticket form (FR-03)
 - Typed Reactive Forms (`nonNullable`), as in ADR-014 §7.
 - Client validators follow FR-03, BR-11 and BR-18: `subject` required, not blank, at most 200 characters after trimming; `category` required, one of `GENERAL`, `POLICY`, `CLAIM`; `referenceNumber` optional, a blank value counts as absent, otherwise after trimming 1–50 characters of `[A-Za-z0-9-]`; `message` required, not blank, at most 4000 characters counted as typed. Lengths are JavaScript string lengths (UTF-16 code units), the same unit as Java's `String.length()`.
-- "Blank" and "trimming" follow Java, because the backend uses `String.isBlank()` and `strip()` and never `trim()` (`NotBlankTextValidator`, `Message`, `Ticket`). A character is whitespace when `Character.isWhitespace` says so: U+0009–U+000D, U+001C–U+001F and the Unicode categories Zs, Zl and Zp except U+00A0, U+2007 and U+202F. U+FEFF is not whitespace. A value is blank when it has only such characters; trimming removes them from both ends. One helper in `features/client` implements this for the form and the composer. NUL characters, which the backend also rejects, are not checked on the client; the server's 400 is shown.
+- "Blank" and "trimming" follow Java, because the backend uses `String.isBlank()` and `strip()` and never `trim()` (`NotBlankTextValidator`, `Message`, `Ticket`). A character is whitespace when `Character.isWhitespace` says so: U+0009–U+000D, U+001C–U+001F and the Unicode categories Zs, Zl and Zp except U+00A0, U+2007 and U+202F. U+FEFF is not whitespace. A value is blank when it has only such characters; trimming removes them from both ends. One helper implements this for the form and the composer; since step 8c it is `shared/text/java-whitespace.ts`, which the agent composer uses too (ADR-016 §3). NUL characters, which the backend also rejects, are not checked on the client; the server's 400 is shown.
 - `category` has no preselected value: the customer chooses it, because the category decides how the ticket is handled. The control is `TicketCategory | null` with `Validators.required` and holds `null` until a category is chosen; the request type keeps `category: TicketCategory`, and the handler narrows the value after the validity check.
 - Labels: "Subject", "Category", "Reference number (optional)", "Message". "Optional" is part of the label, not a hint, because Material hides hints while an error is shown. The button is "Create ticket", with a spinner while submitting (ADR-014 §7).
 - Values are sent as typed; the server normalizes them.
@@ -367,9 +367,9 @@ Vitest with `provideHttpClientTesting` and `HttpTestingController`, `MemoryStora
 
 ## ADR-016: Agent zone
 
-**Status:** Accepted for §1 (step 8a) and §2 (step 8b); the sections for steps 8c and 8d are Planned
+**Status:** Accepted for §1 (step 8a), §2 (step 8b) and §3 (step 8c); the section for step 8d is Planned
 **Date:** 2026-11-03
-**Amended:** 2026-11-04 (results of step 8a); 2026-11-05 (§2 before step 8b; plan review of step 8b); 2026-11-11 (results of step 8b); 2026-11-12 (§3 before step 8c)
+**Amended:** 2026-11-04 (results of step 8a); 2026-11-05 (§2 before step 8b; plan review of step 8b); 2026-11-11 (results of step 8b); 2026-11-12 (§3 before step 8c; results of step 8c)
 
 ### Context
 The agent zone covers FR-07..FR-13 on top of the authentication from ADR-014; today `/staff` holds only a placeholder page with "Log out". The backend for FR-07..FR-12 is in place:
@@ -496,7 +496,7 @@ Header:
 - Everything is rendered from the applied ticket, so the status and the assignee change as soon as a response is applied, for example after the first reply to an unassigned ticket (TR-02, BR-09).
 
 Messages:
-- Server order (NFR-05). Each message shows "<author name> · <role label>" (Customer or Agent) and its date. Customer and agent messages are visually distinct by `author.role`.
+- Server order (NFR-05). Each message shows "<author name> · <role label>" (Customer or Agent) and its date. Customer and agent messages are visually distinct by `author.role`: agent messages on the right and customer messages on the left, the reader's own side, mirrored from the customer zone.
 - No "You" mark: the author has no id, and comparing names would mark another agent's message when two agents share a name (§2, Consequences). An author id in the response is in the backlog.
 - Bodies are rendered with interpolation and `white-space: pre-wrap`, never `innerHTML`.
 
@@ -563,6 +563,7 @@ Step 8c: Vitest with `provideHttpClientTesting`, `HttpTestingController`, `Memor
 - Queue: the subject cell links to `/staff/tickets/<id>` on both queue pages.
 - Routes: `tickets/:id` resolves to `AgentTicketThread` under `StaffShell`.
 - The customer zone specs pass unchanged; the moved `java-whitespace.spec.ts` is unchanged.
+- Parity with the customer thread spec, for the rules this section copies from ADR-015 §6 and §8: the typed body is sent unchanged; the count "0 / 4000" and the typed length; editing the text clears the post error; a server 400 detail under the composer; "Cannot refresh the conversation" after a failed poll; a poll in flight shows no spinner; `<b>x</b>` is rendered as text; a server 400 or 500 detail is shown after a submit through the real button, with `role="alert"`.
 
 Tracers before mutations: a failing `it()` in a staff spec, and a top-level `throw` in every module that is mutated (`agent-api.ts`, `agent-thread-store.ts`, `agent-ticket-thread.ts`, `ticket-queue.ts`). Every mutation type-checks. Mutations, each killed by the test named above:
 1. the sequence check removed in `apply` (a stale poll overwrites the newer thread);
@@ -578,6 +579,12 @@ Tracers before mutations: a failing `it()` in a staff spec, and a top-level `thr
 Build: `npx ng build`. No size is predicted. The initial and lazy sizes are reported; if the initial bundle changes, it is measured against a baseline build of the previous commit (`git worktree`, `--stats-json`, both sides with the same `NG_BUILD_OPTIMIZE_CHUNKS`) before it is accepted.
 
 Manual checks after the tests: open a ticket from the queue and from a customer's page; a reply to an unassigned ticket shows ANSWERED and "Assigned to ... (you)"; an agent reply in the agent thread appears in the customer thread within about 4 seconds, and a customer reply in the agent thread likewise; a ticket closed through Swagger disables "Send" after the next poll and keeps the text; a reload of the page; an unknown id and a non-numeric id show "Ticket not found".
+
+Result of step 8c:
+- Tests: 290 in 24 files, 71 of them new (4 API, 24 store, 41 page, net 1 queue, 1 route). The customer zone changed only one import line in `ticket-thread.ts` and in `new-ticket.ts`; its specs are unchanged, and the moved helper and its spec are byte-identical. The tracers (a failing `it()`, and a top-level throw in each of the four mutated modules) each failed the run.
+- Mutations: 10 runs (1–7, 8a, 8b, 9), all killed by the named tests, which observe the effect; none survived. Mutation 2 is killed by "a stale 401 still stops polling" alone. In 8a and 8b the killer leaves the request to `...992` open, so `verify()` in `afterEach` throws and later tests in the same worker fail with "Cannot configure the test module when the test module has already been instantiated" (43 and 36 failures); without the killer test those files pass, so the extra failures are collateral, not kills.
+- Build: the initial total went from 517.49 kB to 517.43 kB. Measured like for like (both builds with `NG_BUILD_OPTIMIZE_CHUNKS=false`): −295 bytes, of which +75 bytes in 21 modules (the largest `@angular/material/input` +32, `@angular/core` `_pending_tasks-chunk` +31, `@angular/cdk/text-field` +12; not attributed per export) and −370 bytes of glue, because the build has one initial chunk fewer. The same 13 files of `src/` are in the initial bundle on both sides, none from `features/` or `shared/`. Lazy: `staff-routes` 54.45 → 63.31 kB, the chunk shared by both zones 114.09 → 114.45 kB (`shared/text/java-whitespace.ts` is in it), `client-routes` 47.96 → 47.66 kB.
+- Manual checks: all six passed. A ticket opens from the queue and from a customer's page, with the header, the messages and no "You" as decided; a first reply to an unassigned ticket shows Answered and "Assigned to Alice Agent (you)" at once; an agent reply appears in the customer thread and a customer reply in the agent thread within about 4 seconds (two windows side by side, both visible); a close through Swagger by another agent disables "Send" after the next poll, keeps the typed text and shows the hint, and a reopen enables "Send" again; a reload of the thread page loads it again and polls about every 4 seconds without overlap; an unknown id (404) and a non-numeric id (400) show "Ticket not found" with one request each and no polling.
 
 ### Consequences
 - Two agents with the same name look the same in the selector and the filter. Demo accounts have unique names; showing the email would need a requirement change.
