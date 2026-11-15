@@ -369,7 +369,7 @@ Vitest with `provideHttpClientTesting` and `HttpTestingController`, `MemoryStora
 
 **Status:** Accepted for §1 (step 8a), §2 (step 8b) and §3 (step 8c); the section for step 8d is Planned
 **Date:** 2026-11-03
-**Amended:** 2026-11-04 (results of step 8a); 2026-11-05 (§2 before step 8b; plan review of step 8b); 2026-11-11 (results of step 8b); 2026-11-12 (§3 before step 8c; results of step 8c)
+**Amended:** 2026-11-04 (results of step 8a); 2026-11-05 (§2 before step 8b; plan review of step 8b); 2026-11-11 (results of step 8b); 2026-11-12 (§3 before step 8c; results of step 8c); 2026-11-15 (§4 before step 8d)
 
 ### Context
 The agent zone covers FR-07..FR-13 on top of the authentication from ADR-014; today `/staff` holds only a placeholder page with "Log out". The backend for FR-07..FR-12 is in place:
@@ -509,6 +509,41 @@ States:
 - As in the customer thread (ADR-015 §8): a spinner labelled "Loading conversation" only on the first load; a failed first load other than 400/404/401 shows the detail with "Retry"; "Ticket not found" with the link "Back to the queue" (`/staff`); the composer appears after the first successful load.
 - Dates use `DatePipe` with the format `medium`.
 
+#### 4. Status change and assignment (FR-11, FR-12, step 8d)
+Requests and errors were checked live on one ticket before step 8d:
+
+    PUT /api/agent/tickets/{id}/status    body { status: "CLOSED" | "OPEN", version }  200, AgentTicketResponse
+    PUT /api/agent/tickets/{id}/assignee  body { assigneeId, version }                 200, AgentTicketResponse
+
+- An assignment raised the version by one. Assigning the current assignee again returned 200 with the same version (the FR-12 no-op).
+- A stale version: 409 with the detail "The data was changed by another request. Reload it and try again."
+- A transition outside TR-07/TR-08 (OPEN → OPEN): 409 with the detail "The ticket's current status does not allow this action."
+- A customer as the assignee: 400 "Validation failed." with `errors[{ field: "assigneeId", message: "must be an existing agent" }]`.
+
+API service and types:
+- `AgentApi` gets `changeStatus(id: string, status: ManualTicketStatus, version: number)` and `assign(id: string, assigneeId: number, version: number)`. The bodies are exactly `{ status, version }` and `{ assigneeId, version }`.
+- `agent-ticket.ts` gets `ManualTicketStatus = 'CLOSED' | 'OPEN'`, the only values FR-11 accepts.
+
+Store:
+- `AgentThreadStore` gets `changeStatus(status)` and `assign(assigneeId)`. Each sends the `version` of the latest applied ticket at the moment it starts, takes a sequence number like a post, and returns an `Observable<void>` that completes or errors with its own response, applied or not (§3, ADR-015 §6).
+- A success is applied through the sequence check, so a poll that started before the action and arrives after it cannot bring back the old version.
+- Errors: 401 stops polling and shows nothing (ADR-014); 404 shows "Ticket not found"; 409 of either kind reloads the ticket at once as a new numbered request. No automatic retry: the agent sees the other agent's change first and decides whether the action is still needed. Any other error changes no thread state.
+
+Controls (in the header, under the assignee):
+- Status: one button, "Close ticket" when the status is not CLOSED (TR-07) and "Reopen ticket" when it is CLOSED (TR-08), sending CLOSED or OPEN. No other manual transition exists.
+- Assignment: a `mat-select` labelled "Assignee" with the agents from FR-13 in server order (NFR-05); the caller's entry reads "<name> (you)" by `id`, as in §2. Its value is the applied ticket's `assignee.id`, or empty when the ticket is unassigned. There is no empty option: unassigning is not supported (BR-10). If the assignee is not in the loaded list, an option for it is added from `ticket.assignee`, so the select never contradicts the header.
+- Choosing an agent sends the assignment at once; "assign to me" is choosing one's own entry. Choosing the selected option again emits nothing (`mat-select`, §2), so the UI never sends the no-op.
+- The select always shows the applied ticket's assignee: after an error or a stale success, the agent's choice does not stay in it.
+- The agent list is loaded once when the page opens, alongside the first ticket request and independently of it. If it fails, the select is disabled, "Cannot load agents" is shown next to it, and there is no retry until the page is opened again; the status button and the composer work as usual.
+
+One change at a time:
+- A post (§3), a status change and an assignment share one pending state. While any of them is pending, "Send", the status button and the select are disabled; the message field stays editable. Each handler also ignores calls while a change is pending (a double click). This extends the disabled rule of "Send" in §3.
+- Reason: a post raises the version on the server without sending one, so a status change sent during a post would get a 409 the agent caused themselves. A 409 must mean that someone else changed the ticket.
+
+Errors of a status change or an assignment:
+- Shown as `toProblem().detail` with `role="alert"` next to the controls, separately from the composer error, until the next status change or assignment starts. A 401 shows nothing.
+- A 409 shows the server's detail and reloads (above). A 400 from the assignment can only come from an agent who lost the role, which the application cannot do; it shows the generic detail.
+
 ### Tests
 Step 8a, against the real Postgres with a rollback per test, as `AgentCustomerControllerTest`. Committed users (demo accounts) may exist, so assertions look only at the users the test created:
 - the caller is listed; another agent is listed; a customer is not listed;
@@ -586,6 +621,30 @@ Result of step 8c:
 - Build: the initial total went from 517.49 kB to 517.43 kB. Measured like for like (both builds with `NG_BUILD_OPTIMIZE_CHUNKS=false`): −295 bytes, of which +75 bytes in 21 modules (the largest `@angular/material/input` +32, `@angular/core` `_pending_tasks-chunk` +31, `@angular/cdk/text-field` +12; not attributed per export) and −370 bytes of glue, because the build has one initial chunk fewer. The same 13 files of `src/` are in the initial bundle on both sides, none from `features/` or `shared/`. Lazy: `staff-routes` 54.45 → 63.31 kB, the chunk shared by both zones 114.09 → 114.45 kB (`shared/text/java-whitespace.ts` is in it), `client-routes` 47.96 → 47.66 kB.
 - Manual checks: all six passed. A ticket opens from the queue and from a customer's page, with the header, the messages and no "You" as decided; a first reply to an unassigned ticket shows Answered and "Assigned to Alice Agent (you)" at once; an agent reply appears in the customer thread and a customer reply in the agent thread within about 4 seconds (two windows side by side, both visible); a close through Swagger by another agent disables "Send" after the next poll, keeps the typed text and shows the hint, and a reopen enables "Send" again; a reload of the thread page loads it again and polls about every 4 seconds without overlap; an unknown id (404) and a non-numeric id (400) show "Ticket not found" with one request each and no polling.
 
+Step 8d: the same tools as step 8c; the select through the real `mat-select` overlay (§2). Required cases:
+- API service: `changeStatus` and `assign` with the id `9007199254740993` call the right URLs with the id unchanged; the bodies are exactly `{ status, version }` and `{ assigneeId, version }`.
+- Store: an action sends the version of the latest applied ticket (after a poll raised it, the new one); a successful action is applied; a poll that started before an action and arrives after it is ignored; a stale action success completes but is not applied; a 409 of either detail sends a reload; a 404 shows not found and stops polling; a 401 stops polling; a 5xx changes no thread state.
+- Status button: "Close ticket" for OPEN, ANSWERED and CUSTOMER_REPLIED, "Reopen ticket" for CLOSED; a click sends CLOSED or OPEN with the applied version; after a successful reopen the header shows Open and "Send" is enabled with valid text.
+- Assignee select: the options are the agents in server order with "(you)" only on the caller's entry; the selected option is the applied assignee, none for an unassigned ticket; an assignee missing from the list still gets an option; choosing an agent sends their id with the applied version and the header shows the new assignee; choosing the selected option sends nothing (pins library behavior); after a 409 the select shows the applied assignee, the detail is shown and the ticket reloads; an agent list error disables the select and shows "Cannot load agents", while the status button still works.
+- One change at a time: while a post is pending the status button and the select are disabled; while a status change is pending "Send" and the select are disabled; while an assignment is pending "Send" and the status button are disabled; the message field stays editable; a double call of each handler sends one request (handlers called directly).
+- Action errors: the detail is shown next to the controls with `role="alert"` and stays until the next action starts; a 401 shows nothing; a post error is still shown under the composer, not next to the controls.
+
+Tracers as in step 8c, in every mutated module. Every mutation type-checks. Mutations, each killed by the test named above:
+1. an action sends the version of the first loaded ticket instead of the latest applied one;
+2. the 409 reload after an action removed;
+3. the sequence check skipped for action responses (a stale action success overwrites the newer thread);
+4. the pending state ignored by the status button's disabled state;
+5. the pending guard removed from the assignment handler;
+6. the option for an assignee missing from the list not added;
+7. the select keeping the agent's choice after a 409 instead of the applied assignee;
+8. the status mapping inverted (the button on a CLOSED ticket sends CLOSED);
+9. an agent list error also disabling the status button;
+10. the ticket id converted with `Number(...)` in `changeStatus` or `assign` (killed only with the large id).
+
+Build: `npx ng build`. No size is predicted; if the initial bundle changes, it is measured against a baseline build as in step 8c.
+
+Manual checks after the tests: close and reopen a ticket from the thread, with the composer following the status; assign a ticket to another agent and back to oneself, with the header and the select in step; a change made through Swagger after the last poll makes the next action get the "data was changed" 409, the detail and a reload; another agent closing the ticket after the last poll makes "Close ticket" get the "status does not allow" 409; the controls are disabled while a slow post is pending (DevTools throttling); a ticket assigned to an agent missing from the list is not possible in the demo data and is covered by tests only.
+
 ### Consequences
 - Two agents with the same name look the same in the selector and the filter. Demo accounts have unique names; showing the email would need a requirement change.
 - The order depends on the database collation, so tests never compare the whole response with an order computed in Java.
@@ -601,6 +660,10 @@ Result of step 8c:
 - The agent zone has its own copy of the polling rules of ADR-015 §4 (step 8c). A fix in one store must be checked against the other; the two specs cover the same cases.
 - An agent's own messages are not marked in the thread, and two agents with the same name look the same there. An author id in FR-09 would allow a reliable "(you)".
 - Until step 8d an agent cannot reopen a CLOSED ticket from the UI, so the composer stays disabled on it; Swagger covers the gap.
+- One pending change at a time: on a slow network the agent waits for a post before closing or reassigning. The message field stays editable meanwhile.
+- After a 409 the agent repeats the action by hand when it is still needed; nothing is retried automatically.
+- The agent list for the select is as fresh as the page; a new agent appears after the thread is opened again. The current assignee is always selectable, even when missing from the list.
+- A 400 from the assignment shows the generic "Validation failed."; the UI offers only agents, so it can occur only if an agent lost the role, which the application cannot do.
 
 ### Alternatives considered
 - Collecting agents from the `assignee` fields of queue responses: no backend change, but misses agents without tickets and changes with the filter.
@@ -620,3 +683,10 @@ Result of step 8c:
 - Importing `java-whitespace.ts` from `features/client` into the agent zone: one zone depending on another. A copy in the agent zone: two implementations of backend rules that must stay identical.
 - Hiding the composer on a CLOSED ticket: a poll that brings CLOSED would remove the field with the typed text.
 - Leaving "Send" enabled on a CLOSED ticket and relying on the 409: the agent learns about the close only after trying.
+- Retrying an action automatically with a fresh version after a 409: overwrites another agent's change the agent has not seen, which is what optimistic locking prevents.
+- Showing a 409 detail without a reload: the header stays stale until the next poll, and a second click gets the same 409.
+- An "Assign to me" button next to the select: two controls with one effect for the most common choice, and twice the tests.
+- A select with an "Assign" confirmation button: an extra click and a chosen-but-not-applied state that a poll can overwrite.
+- Disabling only the control whose request is pending: a status change during a post gets a 409 the agent caused themselves.
+- Queuing a second action after the first: it is sent after a change the agent had not seen when clicking.
+- Loading the agent list when the select is opened, or caching it across pages: a spinner and an error inside the overlay, or a list that stays stale until the application reloads.
